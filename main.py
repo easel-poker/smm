@@ -12,6 +12,7 @@ TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs"
 TELEGRAM_CHAT_ID   = "8496696077"
 BATCH_SIZE         = 25
 SIGNUP_URL         = "https://onesmm.com/signup"
+LOGOUT_DELAY_SEC   = 3  # ۳ ثانیه انتظار پس از لود کامل اکانت
 # ───────────────────────────────────────────────────────────────
 
 PROXIES = [
@@ -45,7 +46,7 @@ def send_tg_msg(text):
             ],
             "resize_keyboard": True
         }
-        url = f"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         requests.post(url, json={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": text,
@@ -58,7 +59,7 @@ def send_tg_msg(text):
 
 def send_tg_photo(image_bytes, caption):
     try:
-        url = f"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {"photo": ("screenshot.png", image_bytes, "image/png")}
         data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
         requests.post(url, data=data, files=files, timeout=20)
@@ -75,7 +76,7 @@ def send_tg_file(accounts_list, caption):
         for i, acc in enumerate(accounts_list, 1):
             file_text += f"[{i}] Username: {acc['username']}\nEmail: {acc['email']}\nPassword: {acc['password']}\n-----------------------------------\n"
 
-        url = f"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
         files = {"document": (filename, file_text.encode('utf-8'), "text/plain")}
         data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
         requests.post(url, data=data, files=files, timeout=25)
@@ -86,10 +87,11 @@ def send_tg_file(accounts_list, caption):
 def telegram_listener():
     global is_running, last_update_id, current_accounts
     print("🤖 شنود تلگرام فعال است...")
+    send_tg_msg("🚀 *ربات OneSMM در Railway با موفقیت راه‌اندازی شد!*\nچرخه خودکار آماده است.")
 
     while True:
         try:
-            url = f"https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=5"
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates?offset={last_update_id + 1}&timeout=5"
             res = requests.get(url, timeout=10).json()
 
             if res.get("ok") and res.get("result"):
@@ -141,14 +143,14 @@ def telegram_listener():
 
 
 def generate_credentials():
-    first_names = ["alex", "daniel", "david", "ryan", "kevin", "eric", "brian", "sarah", "olivia", "noah", "mason", "lucas", "ethan", "james", "logan", "liam"]
-    last_names = ["miller", "smith", "williams", "brown", "jones", "garcia", "davis", "wilson", "clark", "taylor", "anderson", "white", "jackson"]
+    first_names = ["alex", "daniel", "david", "ryan", "kevin", "eric", "brian", "sarah", "olivia", "noah", "mason", "lucas", "ethan", "james", "logan", "liam", "adam", "ben"]
+    last_names = ["miller", "smith", "williams", "brown", "jones", "garcia", "davis", "wilson", "clark", "taylor", "anderson", "white", "jackson", "harris"]
     fn = random.choice(first_names)
     ln = random.choice(last_names)
     num = random.randint(100, 999)
     username = f"{fn}_{ln}{num}"
-    email = f"{fn}.{ln}{random.randint(1000, 9999)}@gmail.com"
-    password = "Pass@" + "".join(random.choices(string.ascii_letters + string.digits, k=8)) + "1!"
+    email = f"{fn}.{ln}{random.randint(1000, 99990)}@gmail.com"
+    password = "Pass@" + "".join(random.choices(string.ascii_letters + string.digits, k=8)) + "9!"
     return username, email, password
 
 
@@ -162,8 +164,10 @@ def browser_worker():
                 continue
 
             proxy = PROXIES[current_proxy_idx % len(PROXIES)]
-            print(f"\n[+] باز کردن مرورگر با پروکسی: {proxy['country']}")
+            print(f"\n[+] باز کردن مرورگر با پروکسی: {proxy['country']} ({proxy['server']})")
 
+            browser = None
+            context = None
             try:
                 browser = p.chromium.launch(
                     headless=True,
@@ -177,66 +181,91 @@ def browser_worker():
                         "--disable-setuid-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-blink-features=AutomationControlled",
+                        "--disable-infobars",
                         "--window-size=1920,1080"
                     ]
                 )
-            except Exception as e:
-                print(f"[!] خطای پروکسی: {e}")
-                current_proxy_idx += 1
-                time.sleep(2)
-                continue
 
-            context = browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
+                context = browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    locale="en-US",
+                    timezone_id="America/New_York"
+                )
 
-            context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
-            """)
+                # اسکریپت ضدتشخیص و فعال نگه‌داشتن تب در بک‌گراند
+                context.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                    
+                    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+                    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+                    Document.prototype.hasFocus = () => true;
+                    document.hasFocus = () => true;
+                """)
 
-            page = context.new_page()
-            username, email, password = generate_credentials()
+                page = context.new_page()
+                username, email, password = generate_credentials()
 
-            try:
-                print(f"[+] باز کردن سایت OneSMM...")
+                print(f"[+] ورود به صفحه ثبت‌نام OneSMM...")
                 page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=45000)
                 time.sleep(2.0)
 
-                # ۱. انتخاب تب ثبت‌نام و پر کردن مشخصات دقیقاً مثل تمپرمونکی
+                # ۱. پر کردن فیلدها با شبیه‌سازی دقیق رویدادهای کاربر
                 page.evaluate("""({u, e, p}) => {
-                    const signupTab = document.querySelector("#auth-tab-signup");
+                    const signupTab = document.querySelector("#auth-tab-signup") || 
+                                      Array.from(document.querySelectorAll("a, button, div, span")).find(el => 
+                                          el.innerText && el.innerText.trim() === "Sign up" && !el.classList.contains("auth-submit") && el.tagName !== "BUTTON"
+                                      );
                     if (signupTab) signupTab.click();
 
-                    const setV = (sel, val) => {
-                        const el = document.querySelector(sel);
-                        if (el) {
+                    const setNativeValue = (el, val) => {
+                        if (!el) return;
+                        el.focus();
+                        const valueSetter = Object.getOwnPropertyDescriptor(el, 'value')?.set;
+                        const prototype = Object.getPrototypeOf(el);
+                        const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                        if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+                            prototypeValueSetter.call(el, val);
+                        } else if (valueSetter) {
+                            valueSetter.call(el, val);
+                        } else {
                             el.value = val;
-                            el.dispatchEvent(new Event('input', { bubbles: true }));
-                            el.dispatchEvent(new Event('change', { bubbles: true }));
                         }
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                        el.dispatchEvent(new Event('blur', { bubbles: true }));
                     };
-                    setV('#login', u);
-                    setV('#email', e);
-                    setV('#password', p);
-                    setV('#password_again', p);
+
+                    const passInputs = document.querySelectorAll("#auth-panel-signup input[type='password'], form input[type='password'], input[type='password']");
+                    const uField = document.querySelector("#login") || document.querySelector("input[name='login']") || document.querySelector("input[name='username']");
+                    const eField = document.querySelector("#email") || document.querySelector("input[name='email']") || document.querySelector("input[type='email']");
+                    const pField = document.querySelector("#password") || document.querySelector("input[name='password']") || passInputs[0];
+                    const cField = document.querySelector("#password_again") || document.querySelector("input[name='password_again']") || passInputs[1];
+
+                    setNativeValue(uField, u);
+                    setNativeValue(eField, e);
+                    setNativeValue(pField, p);
+                    setNativeValue(cField, p);
                 }""", {"u": username, "e": email, "p": password})
 
                 time.sleep(1.0)
 
-                # ۲. کلیک مستقیم و بدون معطلی روی دکمه ثبت‌نام
+                # ۲. کلیک اول روی Sign up برای احضار کپچا
+                print(f"[+] کلیک اول روی Sign up...")
                 page.evaluate("""() => {
                     const btn = document.querySelector('#auth-panel-signup button.auth-submit') || 
                                 document.querySelector('#auth-panel-signup button[type="submit"]') ||
-                                document.querySelector('button.auth-submit');
+                                document.querySelector('button.auth-submit') ||
+                                Array.from(document.querySelectorAll("button")).find(b => b.innerText && b.innerText.includes("Sign up"));
                     if (btn) btn.click();
                 }""")
-                print(f"[+] دکمه ثبت‌نام فشرده شد.")
 
-                # ۳. کلیک خودکار روی تیک کپچا داخل فریم
-                time.sleep(2.0)
-                for _ in range(15):
+                # ۳. پایش و کلیک روی تیک کپچا
+                print(f"[+] در حال کلیک و بررسی تیک کپچا...")
+                captcha_solved = False
+                for _ in range(25):
+                    # کلیک روی تیک در تمام فریم‌های کپچا
                     for frame in page.frames:
                         if "hcaptcha.com" in frame.url.lower():
                             try:
@@ -248,53 +277,94 @@ def browser_worker():
                                 }""")
                             except Exception:
                                 pass
+
+                    # بررسی مقداردهی توکن حل شده
+                    try:
+                        token_len = page.evaluate("""() => {
+                            const resp = document.querySelector("[name='h-captcha-response'], [name='g-recaptcha-response']");
+                            return resp ? (resp.value || '').trim().length : 0;
+                        }""")
+                        if token_len > 10:
+                            captcha_solved = True
+                            print(f"[✓] تیک کپچا با موفقیت تایید شد!")
+                            break
+                    except Exception:
+                        pass
+
                     time.sleep(0.8)
 
-                # انتظار برای اتمام ثبت‌نام
-                time.sleep(6.0)
+                # ۴. انتظار برای تکمیل خودکار ورود به اکانت توسط سایت
+                print(f"[+] انتظار برای لود اکانت و تایید ورود...")
+                logged_in = False
+                for _ in range(20):
+                    is_logged = page.evaluate("""() => {
+                        return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout'], .user-avatar, .account-balance, a[href*='/orders']") !== null;
+                    }""")
+                    if is_logged:
+                        logged_in = True
+                        break
+                    time.sleep(0.6)
 
-                with lock:
-                    current_accounts.append({
-                        "username": username,
-                        "email": email,
-                        "password": password
-                    })
-                    total_created_count += 1
+                # ۵. تاخیر ۳ ثانیه‌ای برای لود کامل اکانت
+                if logged_in:
+                    print(f"[+] اکانت لود شد. انتظار {LOGOUT_DELAY_SEC} ثانیه...")
+                    time.sleep(LOGOUT_DELAY_SEC)
 
-                # ارسال اعلان زنده به تلگرام
-                send_tg_msg(
-                    f"👤 *اکانت جدید ساخته شد ({len(current_accounts)}/{BATCH_SIZE}):*\n"
-                    f"🌍 پروکسی: {proxy['country']}\n"
-                    f"Username: `{username}`\n"
-                    f"Email: `{email}`\n"
-                    f"Password: `{password}`"
-                )
-                print(f"[✓] اکانت {username} ساخته شد.")
-
-                # ارسال پکیج ۲۵ تایی و تغییر پروکسی
-                if len(current_accounts) >= BATCH_SIZE:
-                    next_p = PROXIES[(current_proxy_idx + 1) % len(PROXIES)]["country"]
-                    send_tg_file(
-                        current_accounts,
-                        f"🎁 *پکیج ۲۵ تایی تکمیل و ارسال شد!*\n🔄 حافظه ریست شد.\n🌐 پروکسی بعدی ➔ {next_p}"
-                    )
                     with lock:
-                        current_accounts.clear()
+                        current_accounts.append({
+                            "username": username,
+                            "email": email,
+                            "password": password
+                        })
+                        total_created_count += 1
+
+                    # ارسال نوتیفیکیشن تلگرام
+                    send_tg_msg(
+                        f"👤 *اکانت جدید ساخته شد ({len(current_accounts)}/{BATCH_SIZE}):*\n"
+                        f"🌍 پروکسی: {proxy['country']}\n"
+                        f"Username: `{username}`\n"
+                        f"Email: `{email}`\n"
+                        f"Password: `{password}`"
+                    )
+                    print(f"[✓] اکانت {username} با موفقیت ثبت و ذخیره شد.")
+
+                    # ارسال پکیج ۲۵ تایی و تغییر پروکسی
+                    if len(current_accounts) >= BATCH_SIZE:
+                        next_p = PROXIES[(current_proxy_idx + 1) % len(PROXIES)]["country"]
+                        send_tg_file(
+                            current_accounts,
+                            f"🎁 *پکیج {BATCH_SIZE} تایی تکمیل و ارسال شد!*\n🔄 حافظه ریست شد.\n🌐 پروکسی بعدی ➔ {next_p}"
+                        )
+                        with lock:
+                            current_accounts.clear()
+                        current_proxy_idx += 1
+
+                else:
+                    print(f"[!] ورود انجام نشد. تغییر پروکسی...")
                     current_proxy_idx += 1
 
             except Exception as e:
-                print(f"[!] خطا: {e}")
+                print(f"[!] خطا در اجرای مرورگر: {e}")
                 try:
-                    scr = page.screenshot()
-                    send_tg_photo(scr, f"⚠️ *خطا:* `{str(e)[:120]}`")
+                    if page:
+                        scr = page.screenshot()
+                        send_tg_photo(scr, f"⚠️ *خطا در اجرای چرخه:* `{str(e)[:120]}`\nپروکسی: {proxy['country']}")
                 except Exception:
                     pass
                 current_proxy_idx += 1
 
             finally:
-                context.close()
-                browser.close()
-                time.sleep(random.uniform(2.0, 5.0))
+                if context:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+                if browser:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+                time.sleep(random.uniform(2.0, 4.0))
 
 
 if __name__ == "__main__":
