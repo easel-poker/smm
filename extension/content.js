@@ -29,32 +29,28 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         return;
     }
 
-    // ۲. چرخه ثبت‌نام و گوش دادن به دستورات تلگرام در سایت OneSMM
+    // ۲. چرخه ثبت‌نام و مدیریت هوشمند تلگرام
     if (window.location.hostname.includes("onesmm.com")) {
         const path = window.location.pathname.toLowerCase();
         createControlPanel();
 
-        // فعال‌سازی پیش‌فرض چرخه برای سرور Railway
-        if (localStorage.getItem("onesmm_loop_active") === null) {
-            localStorage.setItem("onesmm_loop_active", "true");
+        // ارسال پیام اعلان روشن شدن سرور برای بار اول
+        if (!sessionStorage.getItem("railway_startup_notified")) {
+            sessionStorage.setItem("railway_startup_notified", "true");
+            sendTelegramMessage("🟢 *ربات با موفقیت در Railway روشن شد و آماده دریافت دستورات است!*");
         }
 
-        // حذف وبهوک‌های قدیمی
-        tgRequest("deleteWebhook");
-
-        // پایش پیوسته پیام‌های تلگرام هر ۲.۵ ثانیه
-        setInterval(pollTelegramCommands, 2500);
+        // پایش پیوسته پیام‌های تلگرام هر ۲ ثانیه
+        setInterval(pollTelegramCommands, 2000);
 
         const isLoopActive = localStorage.getItem("onesmm_loop_active") === "true";
         if (!isLoopActive) return;
 
         window.addEventListener('load', function() {
-            // الف) اگر در صفحه ثبت‌نام هستیم -> انجام ثبت‌نام
             if (path.includes("/signup") || path.includes("/register")) {
                 setPanelStatus("✍️ در حال پر کردن فرم...");
                 setTimeout(runRegistrationFlow, 1000);
             }
-            // ب) اگر ثبت‌نام تمام شد و لاگین شدیم -> خروج خودکار
             else if (isUserActuallyLoggedIn()) {
                 setPanelStatus("🎉 ثبت‌نام موفق! در حال خروج...");
                 setTimeout(() => {
@@ -67,7 +63,6 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
                     }
                 }, 2500);
             }
-            // ج) اگر بعد از خروج در صفحه اصلی هستیم -> بازگشت فوری به ثبت‌نام
             else {
                 setPanelStatus("🔄 بازگشت به صفحه ثبت‌نام...");
                 setTimeout(() => {
@@ -77,37 +72,30 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         });
     }
 
-    // تابع ارسال مستقیم درخواست به API تلگرام
-    function tgRequest(endpoint, postData = null) {
-        return new Promise((resolve) => {
-            fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${endpoint}`, {
-                method: postData ? "POST" : "GET",
-                headers: postData ? { "Content-Type": "application/json" } : {},
-                body: postData ? JSON.stringify(postData) : null
-            })
-            .then(res => res.json())
-            .then(data => resolve(data))
-            .catch(() => resolve(null));
-        });
+    function isUserActuallyLoggedIn() {
+        return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout']") !== null;
     }
 
     // دریافت دستورات از تلگرام
     async function pollTelegramCommands() {
-        const data = await tgRequest(`getUpdates?offset=${lastUpdateId + 1}&timeout=1`);
-        if (!data || !data.ok || !data.result) return;
+        try {
+            const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=1`);
+            const data = await res.json();
+            if (!data || !data.ok || !data.result) return;
 
-        for (const update of data.result) {
-            lastUpdateId = update.update_id;
-            localStorage.setItem("tg_last_update_id", lastUpdateId.toString());
+            for (const update of data.result) {
+                lastUpdateId = update.update_id;
+                localStorage.setItem("tg_last_update_id", lastUpdateId.toString());
 
-            const msg = update.message || update.callback_query?.message;
-            const text = update.message?.text || update.callback_query?.data || "";
-            const senderId = (msg?.chat?.id || "").toString();
+                const msg = update.message || update.callback_query?.message;
+                const text = update.message?.text || update.callback_query?.data || "";
+                const senderId = (msg?.chat?.id || "").toString();
 
-            if (senderId !== TELEGRAM_CHAT_ID.toString()) continue;
+                if (senderId !== TELEGRAM_CHAT_ID.toString()) continue;
 
-            handleTelegramCommand(text.trim());
-        }
+                handleTelegramCommand(text.trim());
+            }
+        } catch (e) {}
     }
 
     // پردازش دستورات دکمه‌های تلگرام
@@ -143,11 +131,10 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         else if (cmd === "/reset" || cmd === "🗑️ ریست حافظه") {
             localStorage.setItem("onesmm_saved_accounts", "[]");
             updatePanelStats();
-            sendTelegramMessage("🗑️ *حافظه پکیج جاری صفر شد.*");
+            sendTelegramMessage("🗑️ *حافظه پکیج جاری در Railway صفر شد.*");
         }
     }
 
-    // ارسال پیام متنی با کیبورد به تلگرام
     function sendTelegramMessage(text) {
         const keyboard = {
             keyboard: [
@@ -158,15 +145,18 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
             resize_keyboard: true
         };
 
-        tgRequest("sendMessage", {
-            chat_id: TELEGRAM_CHAT_ID,
-            text: text,
-            parse_mode: "Markdown",
-            reply_markup: keyboard
-        });
+        fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_CHAT_ID,
+                text: text,
+                parse_mode: "Markdown",
+                reply_markup: keyboard
+            })
+        }).catch(err => console.log("Telegram error:", err));
     }
 
-    // ارسال فایل متنی داکیومنت به تلگرام
     function sendBatchFile(accounts, filename) {
         let fileText = `=== پکیج ${accounts.length} اکانت OneSMM (Railway Server) ===\nتاریخ: ${new Date().toLocaleString()}\n\n`;
         accounts.forEach((acc, i) => {
@@ -183,10 +173,6 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
             method: "POST",
             body: formData
         }).catch(err => console.log("Telegram send file error:", err));
-    }
-
-    function isUserActuallyLoggedIn() {
-        return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout']") !== null;
     }
 
     function runRegistrationFlow() {
@@ -233,7 +219,6 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         }, 800);
     }
 
-    // ذخیره اکانت و ارسال خودکار پکیج ۲۵ تایی
     function saveAndCheckBatch(u, e, p) {
         let accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
         accounts.push({
@@ -247,7 +232,7 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
             const filename = `onesmm_railway_batch_${BATCH_SIZE}_${Date.now().toString().slice(-6)}.txt`;
             sendBatchFile(accounts, filename);
 
-            sendTelegramMessage(`🎁 *پکیج ${BATCH_SIZE} تایی اکانت‌ها در سرور Railway تکمیل و ارسال شد!*\n🔄 حافظه ریست شد و چرخه برای ۲۵ تای بعدی ادامه دارد...`);
+            sendTelegramMessage(`🎁 *پکیج ${BATCH_SIZE} تایی اکانت‌ها در سرور Railway تکمیل و ارسال شد!*\n🔄 حافظه صفر شد و چرخه برای ۲۵ تای بعدی ادامه دارد...`);
 
             localStorage.setItem("onesmm_saved_accounts", "[]");
         } else {
