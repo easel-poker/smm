@@ -114,7 +114,7 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
                 total_created_count += 1
                 count = len(current_accounts)
 
-            print(f"[✓] اکانت جدید: {username}")
+            print(f"[✓] اکانت جدید دریافت شد: {username}")
 
             send_tg_msg(
                 f"👤 *اکانت جدید ساخته شد ({count}/{BATCH_SIZE}):*\n"
@@ -233,17 +233,11 @@ def start_chrome_supervisor():
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-sync",
-        "--disable-gcm",
-        "--disable-component-update",
-        "--disable-domain-reliability",
         "--load-extension=/app/extension",
-        "--disable-extensions-except=/app/extension",
         "--user-data-dir=/app/chrome_profile",
         "--no-first-run",
         "--no-default-browser-check",
+        "--window-size=1920,1080",
         "--start-maximized",
         "https://onesmm.com/signup"
     ]

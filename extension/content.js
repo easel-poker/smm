@@ -1,30 +1,12 @@
 // ─── تنظیمات افزونه OneSMM ─────────────────────────────────
-const LOGOUT_WAIT_SEC = 3;  // ۳ ثانیه انتظار پس از لود کامل اکانت
+const LOGOUT_WAIT_SEC = 3;
 const PYTHON_API_URL  = "http://127.0.0.1:5000";
 // ──────────────────────────────────────────────────────────
 
 (function() {
     'use strict';
 
-    // 🔥 جعل دائمی فوکوس و فعال بودن تب در پس‌زمینه
-    bypassBackgroundThrottling();
-
-    function bypassBackgroundThrottling() {
-        try {
-            Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-            Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-            Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
-
-            Document.prototype.hasFocus = () => true;
-            document.hasFocus = () => true;
-
-            const blockEvents = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'mouseleave'];
-            blockEvents.forEach(evt => {
-                window.addEventListener(evt, e => e.stopImmediatePropagation(), true);
-                document.addEventListener(evt, e => e.stopImmediatePropagation(), true);
-            });
-        } catch (e) {}
-    }
+    console.log("🚀 OneSMM Extension injected into:", window.location.href);
 
     // ۱. کلیک خودکار روی تیک داخل فریم hCaptcha
     if (window.location.hostname.includes("hcaptcha.com")) {
@@ -48,11 +30,8 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
 
     // ۲. چرخه ثبت‌نام OneSMM
     if (window.location.hostname.includes("onesmm.com")) {
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initExtensionBot);
-        } else {
-            initExtensionBot();
-        }
+        // ایجاد قطعی پنل
+        createControlPanel();
 
         // پایش مداوم پنل و لاگین
         setInterval(() => {
@@ -65,20 +44,8 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
                 handleLoggedInAccount();
             }
         }, 800);
-    }
 
-    async function initExtensionBot() {
-        createControlPanel();
-
-        // همگام‌سازی وضعیت شروع با سرور ناظر پایتون
-        try {
-            const res = await fetch(PYTHON_API_URL, { timeout: 2000 });
-            const data = await res.json();
-            if (data && data.is_running !== undefined) {
-                localStorage.setItem("onesmm_loop_active", data.is_running ? "true" : "false");
-            }
-        } catch (e) {}
-
+        // شروع جریان کار
         setTimeout(processFlow, 600);
     }
 
@@ -100,7 +67,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
         window.onesmm_is_logging_out = false;
 
         // ب) اگر در صفحه ثبت‌نام است -> پر کردن فرم
-        if (path.includes("signup") || path.includes("register")) {
+        if (path.includes("signup") || path.includes("register") || document.querySelector("#auth-tab-signup")) {
             setPanelStatus("✍️ پر کردن اطلاعات ثبتنام...");
             setTimeout(runRegistrationFlow, 500);
             return;
@@ -268,7 +235,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
                 localStorage.setItem("onesmm_saved_accounts", JSON.stringify(accounts));
                 updatePanelStats();
 
-                // گزارش فوری به ناظر پایتون جهت ارسال به تلگرام
+                // ارسال اکانت به سرور پایتون برای تلگرام
                 fetch(PYTHON_API_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
