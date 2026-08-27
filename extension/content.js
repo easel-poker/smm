@@ -6,7 +6,10 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
 (function() {
     'use strict';
 
-    console.log("🚀 OneSMM Extension injected into:", window.location.href);
+    if (window.onesmm_script_initialized) return;
+    window.onesmm_script_initialized = true;
+
+    console.log("🔥 OneSMM Bot Activated on:", window.location.href);
 
     // ۱. کلیک خودکار روی تیک داخل فریم hCaptcha
     if (window.location.hostname.includes("hcaptcha.com")) {
@@ -28,25 +31,27 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
         return;
     }
 
-    // ۲. چرخه ثبت‌نام OneSMM
+    // ۲. چرخه OneSMM
     if (window.location.hostname.includes("onesmm.com")) {
-        // ایجاد قطعی پنل
-        createControlPanel();
+        // ایجاد پنل
+        ensurePanelExists();
 
-        // پایش مداوم پنل و لاگین
         setInterval(() => {
-            if (document.body && !document.getElementById("onesmm-bot-panel")) {
-                createControlPanel();
-            }
+            ensurePanelExists();
 
             if (localStorage.getItem("onesmm_loop_active") !== "false" && isUserActuallyLoggedIn() && !window.onesmm_is_logging_out) {
                 window.onesmm_is_logging_out = true;
                 handleLoggedInAccount();
             }
-        }, 800);
+        }, 600);
 
-        // شروع جریان کار
-        setTimeout(processFlow, 600);
+        setTimeout(processFlow, 800);
+    }
+
+    function ensurePanelExists() {
+        if (!document.getElementById("onesmm-bot-panel")) {
+            createControlPanel();
+        }
     }
 
     function processFlow() {
@@ -55,7 +60,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
 
         const path = window.location.pathname.toLowerCase();
 
-        // الف) اگر کاربر داخل اکانت است -> صبر ۳ ثانیه‌ای و خروج
+        // الف) اگر کاربر لاگین است -> خروج
         if (isUserActuallyLoggedIn()) {
             if (!window.onesmm_is_logging_out) {
                 window.onesmm_is_logging_out = true;
@@ -73,7 +78,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
             return;
         }
 
-        // ج) اگر در صفحه دیگری است -> هدایت به signup
+        // ج) هدایت به signup
         setPanelStatus("🔄 هدایت به صفحه ثبتنام (signup)...");
         setTimeout(() => {
             window.location.href = "https://onesmm.com/signup";
@@ -216,7 +221,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
                 saveCandidateAccount();
             } else if (waitSeconds > 35) {
                 clearInterval(interval);
-                setPanelStatus("⚠️ زمان انتظار کپچا تمام شد -> رفرش...");
+                setPanelStatus("⚠️ زمان انتظار تمام شد -> تلاش مجدد...");
                 setTimeout(() => {
                     window.location.href = "https://onesmm.com/signup";
                 }, 1500);
@@ -235,7 +240,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
                 localStorage.setItem("onesmm_saved_accounts", JSON.stringify(accounts));
                 updatePanelStats();
 
-                // ارسال اکانت به سرور پایتون برای تلگرام
+                // ارسال به پایتون
                 fetch(PYTHON_API_URL, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -247,28 +252,29 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
     }
 
     function createControlPanel() {
-        if (document.getElementById("onesmm-bot-panel") || !document.body) return;
+        const target = document.body || document.documentElement;
+        if (document.getElementById("onesmm-bot-panel") || !target) return;
 
         const panel = document.createElement("div");
         panel.id = "onesmm-bot-panel";
         panel.style.position = "fixed";
         panel.style.bottom = "20px";
         panel.style.right = "20px";
-        panel.style.zIndex = "99999999";
+        panel.style.zIndex = "2147483647"; // حداکثر لایه zIndex
         panel.style.backgroundColor = "#0f172a";
-        panel.style.border = "2px solid #38bdf8";
+        panel.style.border = "3px solid #38bdf8";
         panel.style.borderRadius = "12px";
         panel.style.padding = "14px 18px";
         panel.style.color = "#f8fafc";
         panel.style.fontFamily = "system-ui, sans-serif";
         panel.style.fontSize = "13px";
-        panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.6)";
+        panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.8)";
         panel.style.minWidth = "260px";
 
         const isLoop = localStorage.getItem("onesmm_loop_active") !== "false";
 
         panel.innerHTML = `
-            <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px; font-size: 14px; text-align: center;">🤖 چرخه خودکار OneSMM</div>
+            <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px; font-size: 14px; text-align: center;">🤖 OneSMM چرخه خودکار</div>
             <div id="onesmm-status-text" style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; text-align: center;">وضعیت: آماده</div>
             <div style="margin-bottom: 10px; font-size: 12px; color: #cbd5e1; display: flex; justify-content: space-between;">
                 <span>📊 اکانتهای موفق:</span>
@@ -290,7 +296,7 @@ const PYTHON_API_URL  = "http://127.0.0.1:5000";
             </div>
         `;
 
-        document.body.appendChild(panel);
+        target.appendChild(panel);
 
         document.getElementById("onesmm-toggle-btn").addEventListener("click", function() {
             const current = localStorage.getItem("onesmm_loop_active") !== "false";

@@ -114,7 +114,7 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
                 total_created_count += 1
                 count = len(current_accounts)
 
-            print(f"[✓] اکانت جدید دریافت شد: {username}")
+            print(f"[✓] اکانت جدید: {username}")
 
             send_tg_msg(
                 f"👤 *اکانت جدید ساخته شد ({count}/{BATCH_SIZE}):*\n"
@@ -233,6 +233,7 @@ def start_chrome_supervisor():
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
+        "--disable-extensions-except=/app/extension",
         "--load-extension=/app/extension",
         "--user-data-dir=/app/chrome_profile",
         "--no-first-run",
