@@ -12,7 +12,7 @@ TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs"
 TELEGRAM_CHAT_ID   = "8496696077"
 BATCH_SIZE         = 25
 SIGNUP_URL         = "https://onesmm.com/signup"
-LOGOUT_DELAY_SEC   = 3  # ۳ ثانیه انتظار پس از لود کامل اکانت
+LOGOUT_DELAY_SEC   = 3
 # ───────────────────────────────────────────────────────────────
 
 PROXIES = [
@@ -168,6 +168,7 @@ def browser_worker():
 
             browser = None
             context = None
+            page = None
             try:
                 browser = p.chromium.launch(
                     headless=True,
@@ -193,11 +194,10 @@ def browser_worker():
                     timezone_id="America/New_York"
                 )
 
-                # اسکریپت ضدتشخیص و فعال نگه‌داشتن تب در بک‌گراند
+                # اسکریپت ضدتشخیص
                 context.add_init_script("""
                     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                     window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
-                    
                     Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
                     Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
                     Document.prototype.hasFocus = () => true;
@@ -205,20 +205,23 @@ def browser_worker():
                 """)
 
                 page = context.new_page()
+                page.set_default_timeout(20000)  # حداکثر ۲۰ ثانیه تایم‌اوت به جای ۴۵ ثانیه برای سرعت بیشتر
                 username, email, password = generate_credentials()
 
                 print(f"[+] ورود به صفحه ثبت‌نام OneSMM...")
-                page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=45000)
-                time.sleep(2.0)
+                page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=20000)
+                time.sleep(1.5)
 
-                # ۱. پر کردن فیلدها با شبیه‌سازی دقیق رویدادهای کاربر
+                # ۱. کلیک روی تب Sign up و پر کردن فیلدها
+                signup_tab = page.locator("#auth-tab-signup, a:has-text('Sign up'), button:has-text('Sign up')").first
+                if signup_tab.count() > 0:
+                    try:
+                        signup_tab.click(timeout=2000)
+                    except Exception:
+                        pass
+
+                # پر کردن دقیق با رویدادهای استاندارد
                 page.evaluate("""({u, e, p}) => {
-                    const signupTab = document.querySelector("#auth-tab-signup") || 
-                                      Array.from(document.querySelectorAll("a, button, div, span")).find(el => 
-                                          el.innerText && el.innerText.trim() === "Sign up" && !el.classList.contains("auth-submit") && el.tagName !== "BUTTON"
-                                      );
-                    if (signupTab) signupTab.click();
-
                     const setNativeValue = (el, val) => {
                         if (!el) return;
                         el.focus();
@@ -251,30 +254,24 @@ def browser_worker():
 
                 time.sleep(1.0)
 
-                # ۲. کلیک اول روی Sign up برای احضار کپچا
-                print(f"[+] کلیک اول روی Sign up...")
-                page.evaluate("""() => {
-                    const btn = document.querySelector('#auth-panel-signup button.auth-submit') || 
-                                document.querySelector('#auth-panel-signup button[type="submit"]') ||
-                                document.querySelector('button.auth-submit') ||
-                                Array.from(document.querySelectorAll("button")).find(b => b.innerText && b.innerText.includes("Sign up"));
-                    if (btn) btn.click();
-                }""")
+                # ۲. کلیک واقعی ماوس روی دکمه Sign up برای احضار کپچا
+                print(f"[+] کلیک روی دکمه Sign up...")
+                submit_btn = page.locator("#auth-panel-signup button.auth-submit, #auth-panel-signup button[type='submit'], button.auth-submit, button:has-text('Sign up')").first
+                if submit_btn.count() > 0:
+                    submit_btn.click(timeout=3000)
+                else:
+                    page.evaluate("() => document.querySelector('button[type=\"submit\"]').click()")
 
-                # ۳. پایش و کلیک روی تیک کپچا
-                print(f"[+] در حال کلیک و بررسی تیک کپچا...")
+                # ۳. کلیک واقعی ماوس (Trusted Click) روی تیک hCaptcha در تمام فریم‌ها
+                print(f"[+] در حال کلیک واقعی روی تیک کپچا...")
                 captcha_solved = False
                 for _ in range(25):
-                    # کلیک روی تیک در تمام فریم‌های کپچا
                     for frame in page.frames:
                         if "hcaptcha.com" in frame.url.lower():
                             try:
-                                frame.evaluate("""() => {
-                                    const cb = document.querySelector('#checkbox') || 
-                                               document.querySelector('#anchor') || 
-                                               document.querySelector('[role="checkbox"]');
-                                    if (cb) cb.click();
-                                }""")
+                                cb = frame.locator("#checkbox, #anchor, [role='checkbox']").first
+                                if cb.count() > 0 and cb.is_visible():
+                                    cb.click(timeout=2000)
                             except Exception:
                                 pass
 
@@ -293,8 +290,8 @@ def browser_worker():
 
                     time.sleep(0.8)
 
-                # ۴. انتظار برای تکمیل خودکار ورود به اکانت توسط سایت
-                print(f"[+] انتظار برای لود اکانت و تایید ورود...")
+                # ۴. بررسی ورود به پنل و داشبورد اکانت
+                print(f"[+] در حال بررسی ورود به داشبورد اکانت...")
                 logged_in = False
                 for _ in range(20):
                     is_logged = page.evaluate("""() => {
@@ -307,7 +304,7 @@ def browser_worker():
 
                 # ۵. تاخیر ۳ ثانیه‌ای برای لود کامل اکانت
                 if logged_in:
-                    print(f"[+] اکانت لود شد. انتظار {LOGOUT_DELAY_SEC} ثانیه...")
+                    print(f"[+] اکانت با موفقیت لود شد. انتظار {LOGOUT_DELAY_SEC} ثانیه...")
                     time.sleep(LOGOUT_DELAY_SEC)
 
                     with lock:
@@ -318,7 +315,7 @@ def browser_worker():
                         })
                         total_created_count += 1
 
-                    # ارسال نوتیفیکیشن تلگرام
+                    # ارسال پیام موفقیت به تلگرام
                     send_tg_msg(
                         f"👤 *اکانت جدید ساخته شد ({len(current_accounts)}/{BATCH_SIZE}):*\n"
                         f"🌍 پروکسی: {proxy['country']}\n"
@@ -326,7 +323,7 @@ def browser_worker():
                         f"Email: `{email}`\n"
                         f"Password: `{password}`"
                     )
-                    print(f"[✓] اکانت {username} با موفقیت ثبت و ذخیره شد.")
+                    print(f"[✓] اکانت {username} ذخیره شد.")
 
                     # ارسال پکیج ۲۵ تایی و تغییر پروکسی
                     if len(current_accounts) >= BATCH_SIZE:
@@ -340,17 +337,22 @@ def browser_worker():
                         current_proxy_idx += 1
 
                 else:
-                    print(f"[!] ورود انجام نشد. تغییر پروکسی...")
+                    print(f"[!] ورود تایید نشد (احتمالاً به دلیل کپچا تصویری در این پروکسی). سوئیچ به پروکسی بعدی...")
+                    try:
+                        scr = page.screenshot()
+                        send_tg_photo(scr, f"⚠️ *عدم ورود:* کپچا یا پروکسی {proxy['country']} رد نشد. در حال تست پروکسی بعدی...")
+                    except Exception:
+                        pass
                     current_proxy_idx += 1
 
             except Exception as e:
-                print(f"[!] خطا در اجرای مرورگر: {e}")
+                print(f"[!] خطا: {e}")
                 try:
                     if page:
                         scr = page.screenshot()
-                        send_tg_photo(scr, f"⚠️ *خطا در اجرای چرخه:* `{str(e)[:120]}`\nپروکسی: {proxy['country']}")
+                        send_tg_photo(scr, f"⚠️ *خطا در سرور:* `{str(e)[:100]}`\nپروکسی: {proxy['country']}")
                 except Exception:
-                    pass
+                    send_tg_msg(f"⚠️ *خطای پروکسی {proxy['country']}:* `{str(e)[:100]}`\nدر حال رفتن به پروکسی بعدی...")
                 current_proxy_idx += 1
 
             finally:
@@ -364,7 +366,7 @@ def browser_worker():
                         browser.close()
                     except Exception:
                         pass
-                time.sleep(random.uniform(2.0, 4.0))
+                time.sleep(random.uniform(1.5, 3.0))
 
 
 if __name__ == "__main__":

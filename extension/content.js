@@ -2,12 +2,33 @@
 const TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs";
 const TELEGRAM_CHAT_ID   = "8496696077";
 const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اکانت
+const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود کامل اکانت
 // ──────────────────────────────────────────────────────────
 
 (function() {
     'use strict';
 
     let lastUpdateId = parseInt(localStorage.getItem("tg_last_update_id") || "0");
+
+    // 🔥 جعل دائمی فوکوس و فعال بودن تب در پس‌زمینه
+    bypassBackgroundThrottling();
+
+    function bypassBackgroundThrottling() {
+        try {
+            Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+            Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+            Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
+
+            Document.prototype.hasFocus = () => true;
+            document.hasFocus = () => true;
+
+            const blockEvents = ['visibilitychange', 'webkitvisibilitychange', 'blur', 'mouseleave'];
+            blockEvents.forEach(evt => {
+                window.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+                document.addEventListener(evt, e => e.stopImmediatePropagation(), true);
+            });
+        } catch (e) {}
+    }
 
     // ۱. کلیک خودکار روی تیک داخل فریم hCaptcha
     if (window.location.hostname.includes("hcaptcha.com")) {
@@ -21,62 +42,87 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
                 setTimeout(() => {
                     cb.click();
                     console.log("🎯 تیک کپچا فشرده شد!");
-                }, 600);
+                }, 350);
             }
-        }, 300);
+        }, 250);
 
-        setTimeout(() => clearInterval(checkCaptcha), 15000);
+        setTimeout(() => clearInterval(checkCaptcha), 20000);
         return;
     }
 
-    // ۲. چرخه ثبت‌نام و مدیریت هوشمند تلگرام
+    // ۲. چرخه ثبت‌نام و مدیریت هوشمند تلگرام در OneSMM
     if (window.location.hostname.includes("onesmm.com")) {
-        const path = window.location.pathname.toLowerCase();
-        createControlPanel();
-
-        // ارسال پیام اعلان روشن شدن سرور برای بار اول
-        if (!sessionStorage.getItem("railway_startup_notified")) {
-            sessionStorage.setItem("railway_startup_notified", "true");
-            sendTelegramMessage("🟢 *ربات با موفقیت در Railway روشن شد و آماده دریافت دستورات است!*");
+        // اجرای مطمئن
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initExtensionBot);
+        } else {
+            initExtensionBot();
         }
 
-        // پایش پیوسته پیام‌های تلگرام هر ۲ ثانیه
+        // پایش مداوم پنل و لاگین
+        setInterval(() => {
+            if (document.body && !document.getElementById("onesmm-bot-panel")) {
+                createControlPanel();
+            }
+
+            if (localStorage.getItem("onesmm_loop_active") === "true" && isUserActuallyLoggedIn() && !window.onesmm_is_logging_out) {
+                window.onesmm_is_logging_out = true;
+                handleLoggedInAccount();
+            }
+        }, 800);
+    }
+
+    function initExtensionBot() {
+        createControlPanel();
+
+        // پیام روشن شدن اولیه سرور
+        if (!sessionStorage.getItem("railway_startup_notified")) {
+            sessionStorage.setItem("railway_startup_notified", "true");
+            sendTelegramMessage("🚀 *ربات OneSMM (نسخه مرورگر واقعی Chrome + اکستنشن) در Railway روشن شد!*\nچرخه خودکار آماده است.");
+        }
+
+        // شنود دستورات تلگرام هر ۲ ثانیه
         setInterval(pollTelegramCommands, 2000);
 
+        setTimeout(processFlow, 600);
+    }
+
+    function processFlow() {
         const isLoopActive = localStorage.getItem("onesmm_loop_active") === "true";
         if (!isLoopActive) return;
 
-        window.addEventListener('load', function() {
-            if (path.includes("/signup") || path.includes("/register")) {
-                setPanelStatus("✍️ در حال پر کردن فرم...");
-                setTimeout(runRegistrationFlow, 1000);
+        const path = window.location.pathname.toLowerCase();
+
+        // الف) اگر کاربر وارد اکانت شده -> صبر ۳ ثانیه‌ای و خروج
+        if (isUserActuallyLoggedIn()) {
+            if (!window.onesmm_is_logging_out) {
+                window.onesmm_is_logging_out = true;
+                handleLoggedInAccount();
             }
-            else if (isUserActuallyLoggedIn()) {
-                setPanelStatus("🎉 ثبت‌نام موفق! در حال خروج...");
-                setTimeout(() => {
-                    setPanelStatus("🚪 خروج...");
-                    const logoutBtn = document.querySelector("a[href*='logout']");
-                    if (logoutBtn) {
-                        logoutBtn.click();
-                    } else {
-                        window.location.replace("https://onesmm.com/logout");
-                    }
-                }, 2500);
-            }
-            else {
-                setPanelStatus("🔄 بازگشت به صفحه ثبت‌نام...");
-                setTimeout(() => {
-                    window.location.replace("https://onesmm.com/signup");
-                }, 1200);
-            }
-        });
+            return;
+        }
+
+        window.onesmm_is_logging_out = false;
+
+        // ب) اگر در صفحه ثبت‌نام است -> پر کردن فرم
+        if (path.includes("signup") || path.includes("register")) {
+            setPanelStatus("✍️ پر کردن اطلاعات ثبتنام...");
+            setTimeout(runRegistrationFlow, 500);
+            return;
+        }
+
+        // ج) اگر در صفحه دیگری است -> هدایت به signup
+        setPanelStatus("🔄 هدایت به صفحه ثبتنام (signup)...");
+        setTimeout(() => {
+            window.location.href = "https://onesmm.com/signup";
+        }, 800);
     }
 
     function isUserActuallyLoggedIn() {
-        return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout']") !== null;
+        return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout'], .user-avatar, .account-balance, a[href*='/orders'], a[href*='/dashboard']") !== null;
     }
 
-    // دریافت دستورات از تلگرام
+    // دریافت و پردازش دستورات بات تلگرام
     async function pollTelegramCommands() {
         try {
             const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=1`);
@@ -98,7 +144,6 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         } catch (e) {}
     }
 
-    // پردازش دستورات دکمه‌های تلگرام
     function handleTelegramCommand(cmd) {
         const accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
 
@@ -107,26 +152,31 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
             sendTelegramMessage(`🚀 *چرخه خودکار در سرور Railway فعال شد!*\nبه ازای هر ${BATCH_SIZE} اکانت، یک فایل متنی دریافت خواهید کرد.`);
             updatePanelUI();
             if (!window.location.pathname.includes("/signup")) {
-                window.location.replace("https://onesmm.com/signup");
+                window.location.href = "https://onesmm.com/signup";
             } else {
                 runRegistrationFlow();
             }
         }
         else if (cmd === "/stop" || cmd === "⏹️ توقف چرخه") {
             localStorage.setItem("onesmm_loop_active", "false");
-            sendTelegramMessage(`⏹️ *چرخه خودکار متوقف شد.*\nپیشرفت فعلی پکیج: *${accounts.length} / ${BATCH_SIZE}*`);
+            sendTelegramMessage(`⏹️ *چرخه خودکار متوقف شد.*\nپیشرفت فعلی: *${accounts.length} / ${BATCH_SIZE}*`);
             updatePanelUI();
         }
         else if (cmd === "/status" || cmd === "📊 وضعیت") {
             const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
-            sendTelegramMessage(`📊 *وضعیت زنده ربات در Railway:*\n• وضعیت چرخه: ${isLoop ? "🟢 در حال ساخت" : "🔴 متوقف"}\n• پیشرفت پکیج جاری: *${accounts.length} از ${BATCH_SIZE} عدد*`);
+            sendTelegramMessage(
+                `📊 *وضعیت زنده ربات در Railway:*\n` +
+                `• موتور اجرا: مرورگر واقعی Chrome + اکستنشن\n` +
+                `• وضعیت چرخه: ${isLoop ? "🟢 در حال ساخت" : "🔴 متوقف"}\n` +
+                `• پیشرفت پکیج جاری: *${accounts.length} از ${BATCH_SIZE} عدد*`
+            );
         }
         else if (cmd === "/export" || cmd === "💾 دریافت فایل اکانت‌ها") {
             if (accounts.length === 0) {
                 sendTelegramMessage("⚠️ در پکیج فعلی هنوز اکانتی ساخته نشده است!");
                 return;
             }
-            sendBatchFile(accounts, `onesmm_railway_${accounts.length}.txt`);
+            sendBatchFile(accounts, `onesmm_railway_${accounts.length}.txt`, `💾 خروجی دستی (${accounts.length} اکانت)`);
         }
         else if (cmd === "/reset" || cmd === "🗑️ ریست حافظه") {
             localStorage.setItem("onesmm_saved_accounts", "[]");
@@ -154,103 +204,206 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
                 parse_mode: "Markdown",
                 reply_markup: keyboard
             })
-        }).catch(err => console.log("Telegram error:", err));
+        }).catch(() => {});
     }
 
-    function sendBatchFile(accounts, filename) {
-        let fileText = `=== پکیج ${accounts.length} اکانت OneSMM (Railway Server) ===\nتاریخ: ${new Date().toLocaleString()}\n\n`;
+    function sendBatchFile(accounts, filename, caption) {
+        let content = `=== لیست ${accounts.length} اکانت ثبت‌شده OneSMM در Railway ===\n\n`;
         accounts.forEach((acc, i) => {
-            fileText += `[${i+1}] ${acc.time}\nUsername: ${acc.username}\nEmail: ${acc.email}\nPassword: ${acc.password}\n-----------------------------------\n`;
+            content += `[${i+1}] ${acc.time}\nUsername: ${acc.username}\nEmail: ${acc.email}\nPassword: ${acc.password}\n-----------------------------------\n`;
         });
 
-        const blob = new Blob([fileText], { type: "text/plain" });
         const formData = new FormData();
         formData.append("chat_id", TELEGRAM_CHAT_ID);
-        formData.append("document", blob, filename);
-        formData.append("caption", `📦 *فایل پکیج کامل ${accounts.length} اکانت OneSMM (سرور Railway)*\n⏰ زمان: ${new Date().toLocaleTimeString()}`);
+        formData.append("caption", caption || `🎁 *پکیج ${accounts.length} تایی اکانت‌های جدید OneSMM*`);
+        formData.append("parse_mode", "Markdown");
+        formData.append("document", new Blob([content], { type: "text/plain" }), filename);
 
         fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
             method: "POST",
             body: formData
-        }).catch(err => console.log("Telegram send file error:", err));
+        }).catch(() => {});
+    }
+
+    function handleLoggedInAccount() {
+        let remaining = LOGOUT_WAIT_SEC;
+        setPanelStatus(`🎉 اکانت لود شد! خروج تا ${remaining} ثانیه دیگر...`);
+
+        const timer = setInterval(() => {
+            remaining--;
+            if (remaining > 0) {
+                setPanelStatus(`⏳ لود اکانت فعال است. خروج تا ${remaining} ثانیه دیگر...`);
+            } else {
+                clearInterval(timer);
+                setPanelStatus("🚪 در حال خروج از اکانت...");
+
+                const logoutBtn = document.querySelector("a[href*='logout'], a[href*='signout']");
+                if (logoutBtn) {
+                    logoutBtn.click();
+                } else {
+                    window.location.href = "https://onesmm.com/logout";
+                }
+            }
+        }, 1000);
+    }
+
+    function setNativeValue(el, val) {
+        if (!el) return;
+        el.focus();
+        const valueSetter = Object.getOwnPropertyDescriptor(el, 'value')?.set;
+        const prototype = Object.getPrototypeOf(el);
+        const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+
+        if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+            prototypeValueSetter.call(el, val);
+        } else if (valueSetter) {
+            valueSetter.call(el, val);
+        } else {
+            el.value = val;
+        }
+
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
     }
 
     function runRegistrationFlow() {
-        const signupTab = document.querySelector("#auth-tab-signup");
-        if (signupTab) signupTab.click();
+        const signupTab = document.querySelector("#auth-tab-signup") || 
+                          Array.from(document.querySelectorAll("a, button, div, span")).find(el => 
+                              el.innerText && el.innerText.trim() === "Sign up" && !el.classList.contains("auth-submit") && el.tagName !== "BUTTON"
+                          );
+        if (signupTab) {
+            signupTab.click();
+        }
 
         setTimeout(() => {
-            const fNames = ["alex","david","daniel","ryan","kevin","eric","brian","sarah","olivia","noah","mason","lucas","ethan","james","logan","liam","noah"];
+            const fNames = ["alex","david","daniel","ryan","kevin","eric","brian","sarah","olivia","noah","mason","lucas","ethan","james","logan","liam","adam","ben"];
             const lNames = ["miller","smith","williams","brown","jones","garcia","davis","wilson","clark","taylor","anderson","white","jackson","harris"];
             const fn = fNames[Math.floor(Math.random() * fNames.length)];
             const ln = lNames[Math.floor(Math.random() * lNames.length)];
             const num = Math.floor(100 + Math.random() * 900);
-            
-            const username = `${fn}_${ln}${num}`;
-            const email = `${fn}.${ln}${Math.floor(1000 + Math.random() * 9000)}@gmail.com`;
-            const password = "Pass@" + Math.random().toString(36).slice(-8) + "1!";
 
-            const uField = document.querySelector("#login");
-            const eField = document.querySelector("#email");
-            const pField = document.querySelector("#password");
-            const cField = document.querySelector("#password_again");
+            const username = `${fn}_${ln}${num}`;
+            const email = `${fn}.${ln}${Math.floor(1000 + Math.random() * 90000)}@gmail.com`;
+            const password = "Pass@" + Math.random().toString(36).slice(-8) + "9!";
+
+            const passInputs = document.querySelectorAll("#auth-panel-signup input[type='password'], form input[type='password'], input[type='password']");
+            const uField = document.querySelector("#login") || document.querySelector("input[name='login']") || document.querySelector("input[name='username']") || document.querySelector("input[placeholder*='Username' i]");
+            const eField = document.querySelector("#email") || document.querySelector("input[name='email']") || document.querySelector("input[type='email']") || document.querySelector("input[placeholder*='Email' i]");
+            const pField = document.querySelector("#password") || document.querySelector("input[name='password']") || passInputs[0];
+            const cField = document.querySelector("#password_again") || document.querySelector("input[name='password_again']") || document.querySelector("input[name='password_confirmation']") || document.querySelector("input[placeholder*='Confirm' i]") || passInputs[1];
 
             if (uField && eField && pField && cField) {
-                const setVal = (el, val) => {
-                    el.value = val;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                };
+                setNativeValue(uField, username);
+                setNativeValue(eField, email);
+                setNativeValue(pField, password);
+                setNativeValue(cField, password);
 
-                setVal(uField, username);
-                setVal(eField, email);
-                setVal(pField, password);
-                setVal(cField, password);
+                sessionStorage.setItem("onesmm_current_candidate", JSON.stringify({
+                    time: new Date().toLocaleString(),
+                    username: username,
+                    email: email,
+                    password: password
+                }));
 
-                saveAndCheckBatch(username, email, password);
-
+                // ۱. کلیک روی Sign up تا کادر کپچا ظاهر شود
+                setPanelStatus("🚀 ۱. کلیک Sign up برای احضار کپچا...");
                 setTimeout(() => {
-                    const submitBtn = document.querySelector("#auth-panel-signup button.auth-submit") || document.querySelector("button.auth-submit");
-                    if (submitBtn) {
-                        submitBtn.click();
-                    }
-                }, 800);
+                    clickSignupButton();
+
+                    // ۲. منتظر ماندن برای تایید کپچا
+                    setPanelStatus("⏳ ۲. در انتظار تایید تیک کپچا...");
+                    listenForCaptchaSuccess();
+                }, 500);
+
+            } else {
+                setPanelStatus("⚠️ در حال آماده‌سازی فیلدها...");
+                setTimeout(runRegistrationFlow, 800);
             }
-        }, 800);
+        }, 400);
     }
 
-    function saveAndCheckBatch(u, e, p) {
-        let accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
-        accounts.push({
-            time: new Date().toLocaleString(),
-            username: u,
-            email: e,
-            password: p
-        });
+    function clickSignupButton() {
+        const submitBtn = document.querySelector("#auth-panel-signup button.auth-submit") ||
+                          document.querySelector("#auth-panel-signup button[type='submit']") ||
+                          document.querySelector("button.auth-submit") ||
+                          document.querySelector("form button[type='submit']") ||
+                          Array.from(document.querySelectorAll("button")).find(b => b.innerText && b.innerText.includes("Sign up"));
 
-        if (accounts.length >= BATCH_SIZE) {
-            const filename = `onesmm_railway_batch_${BATCH_SIZE}_${Date.now().toString().slice(-6)}.txt`;
-            sendBatchFile(accounts, filename);
-
-            sendTelegramMessage(`🎁 *پکیج ${BATCH_SIZE} تایی اکانت‌ها در سرور Railway تکمیل و ارسال شد!*\n🔄 حافظه صفر شد و چرخه برای ۲۵ تای بعدی ادامه دارد...`);
-
-            localStorage.setItem("onesmm_saved_accounts", "[]");
-        } else {
-            localStorage.setItem("onesmm_saved_accounts", JSON.stringify(accounts));
+        if (submitBtn) {
+            submitBtn.click();
         }
+    }
 
-        updatePanelStats();
+    function listenForCaptchaSuccess() {
+        let isDone = false;
+        let waitSeconds = 0;
+
+        const interval = setInterval(() => {
+            if (isDone) {
+                clearInterval(interval);
+                return;
+            }
+
+            waitSeconds += 0.3;
+
+            const hcaptchaResp = document.querySelector("[name='h-captcha-response'], [name='g-recaptcha-response']");
+            const isSolved = hcaptchaResp && hcaptchaResp.value && hcaptchaResp.value.trim().length > 10;
+
+            if (isSolved) {
+                isDone = true;
+                clearInterval(interval);
+                setPanelStatus("🎯 کپچا تایید شد! در حال انتقال خودکار به اکانت...");
+                saveCandidateAccount();
+            } else if (waitSeconds > 35) {
+                clearInterval(interval);
+                setPanelStatus("⚠️ زمان انتظار کپچا تمام شد -> رفرش...");
+                setTimeout(() => {
+                    window.location.href = "https://onesmm.com/signup";
+                }, 1500);
+            }
+        }, 300);
+    }
+
+    function saveCandidateAccount() {
+        const candidate = sessionStorage.getItem("onesmm_current_candidate");
+        if (candidate) {
+            let accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
+            const acc = JSON.parse(candidate);
+
+            if (!accounts.some(a => a.username === acc.username)) {
+                accounts.push(acc);
+                localStorage.setItem("onesmm_saved_accounts", JSON.stringify(accounts));
+                updatePanelStats();
+
+                // ارسال اعلان لحظه‌ای ساخت اکانت به تلگرام
+                sendTelegramMessage(
+                    `👤 *اکانت جدید ساخته شد (${accounts.length}/${BATCH_SIZE}):*\n` +
+                    `Username: \`${acc.username}\`\n` +
+                    `Email: \`${acc.email}\`\n` +
+                    `Password: \`${acc.password}\``
+                );
+
+                // ارسال پکیج ۲۵ تایی در صورت تکمیل
+                if (accounts.length >= BATCH_SIZE) {
+                    sendBatchFile(accounts, `onesmm_batch_${BATCH_SIZE}_${Date.now()}.txt`, `🎁 *پکیج ${BATCH_SIZE} تایی تکمیل و ارسال شد!*\nحافظه برای پکیج بعدی ریست شد.`);
+                    localStorage.setItem("onesmm_saved_accounts", "[]");
+                    updatePanelStats();
+                }
+            }
+            sessionStorage.removeItem("onesmm_current_candidate");
+        }
     }
 
     function createControlPanel() {
-        if (document.getElementById("onesmm-bot-panel")) return;
+        if (document.getElementById("onesmm-bot-panel") || !document.body) return;
 
         const panel = document.createElement("div");
         panel.id = "onesmm-bot-panel";
         panel.style.position = "fixed";
         panel.style.bottom = "20px";
         panel.style.right = "20px";
-        panel.style.zIndex = "9999999";
+        panel.style.zIndex = "99999999";
         panel.style.backgroundColor = "#0f172a";
         panel.style.border = "2px solid #38bdf8";
         panel.style.borderRadius = "12px";
@@ -259,21 +412,26 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
         panel.style.fontFamily = "system-ui, sans-serif";
         panel.style.fontSize = "13px";
         panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.6)";
-        panel.style.minWidth = "240px";
+        panel.style.minWidth = "260px";
+
+        const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
 
         panel.innerHTML = `
-            <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px; font-size: 14px; text-align: center;">🤖 ربات OneSMM (Railway)</div>
-            <div id="onesmm-status-text" style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; text-align: center;">وضعیت: متصل به تلگرام</div>
+            <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px; font-size: 14px; text-align: center;">🤖 چرخه خودکار OneSMM</div>
+            <div id="onesmm-status-text" style="font-size: 11px; color: #94a3b8; margin-bottom: 8px; text-align: center;">وضعیت: آماده</div>
             <div style="margin-bottom: 10px; font-size: 12px; color: #cbd5e1; display: flex; justify-content: space-between;">
-                <span>📊 پیشرفت پکیج:</span>
-                <b style="color: #4ade80;"><span id="onesmm-acc-count">0</span> / ${BATCH_SIZE}</b>
+                <span>📊 اکانتهای موفق:</span>
+                <b id="onesmm-acc-count" style="color: #4ade80;">0</b>
             </div>
-            <button id="onesmm-toggle-btn" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; background-color: #22c55e; color: white; margin-bottom: 8px;">
-                ▶️ شروع چرخه
+            <button id="onesmm-toggle-btn" style="width: 100%; padding: 8px 10px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; background-color: ${isLoop ? '#ef4444' : '#22c55e'}; color: white; margin-bottom: 8px;">
+                ${isLoop ? '⏹️ توقف چرخه' : '▶️ شروع چرخه خودکار'}
+            </button>
+            <button id="onesmm-force-submit-btn" style="width: 100%; padding: 6px; border-radius: 6px; border: 1px solid #0284c7; background-color: #0369a1; color: white; cursor: pointer; font-size: 11px; margin-bottom: 8px;">
+                ⚡ کلیک Sign up
             </button>
             <div style="display: flex; gap: 6px;">
                 <button id="onesmm-export-btn" style="flex: 2; padding: 6px 8px; border-radius: 6px; border: 1px solid #475569; background-color: #1e293b; color: #38bdf8; cursor: pointer; font-size: 11px;">
-                    💾 دانلود دستی (TXT)
+                    💾 دانلود (TXT)
                 </button>
                 <button id="onesmm-reset-btn" style="flex: 1; padding: 6px 8px; border-radius: 6px; border: 1px solid #ef4444; background-color: #450a0a; color: #f87171; cursor: pointer; font-size: 11px;">
                     🗑️ ریست
@@ -283,19 +441,61 @@ const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اک
 
         document.body.appendChild(panel);
 
-        document.getElementById("onesmm-toggle-btn").addEventListener("click", () => handleTelegramCommand("/start"));
-        document.getElementById("onesmm-export-btn").addEventListener("click", () => handleTelegramCommand("/export"));
-        document.getElementById("onesmm-reset-btn").addEventListener("click", () => handleTelegramCommand("/reset"));
+        document.getElementById("onesmm-toggle-btn").addEventListener("click", function() {
+            const current = localStorage.getItem("onesmm_loop_active") === "true";
+            if (current) {
+                localStorage.setItem("onesmm_loop_active", "false");
+                this.textContent = "▶️ شروع چرخه خودکار";
+                this.style.backgroundColor = "#22c55e";
+                setPanelStatus("چرخه متوقف شد.");
+            } else {
+                localStorage.setItem("onesmm_loop_active", "true");
+                this.textContent = "⏹️ توقف چرخه";
+                this.style.backgroundColor = "#ef4444";
+                if (!window.location.pathname.includes("signup")) {
+                    window.location.href = "https://onesmm.com/signup";
+                } else {
+                    processFlow();
+                }
+            }
+        });
 
-        updatePanelUI();
+        document.getElementById("onesmm-force-submit-btn").addEventListener("click", function() {
+            clickSignupButton();
+        });
+
+        document.getElementById("onesmm-export-btn").addEventListener("click", function() {
+            const accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
+            if (accounts.length === 0) {
+                alert("هنوز اکانتی در لیست ذخیره نشده است!");
+                return;
+            }
+            sendBatchFile(accounts, `onesmm_manual_${accounts.length}.txt`, `💾 دانلود دستی لیست اکانت‌ها`);
+        });
+
+        document.getElementById("onesmm-reset-btn").addEventListener("click", function() {
+            const accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
+            if (accounts.length === 0) {
+                alert("حافظه اکانتها از قبل خالی است!");
+                return;
+            }
+            if (confirm(`⚠️ آیا مطمئن هستید که میخواهید تمام ${accounts.length} اکانت ذخیرهشده از حافظه پاک شوند؟`)) {
+                localStorage.removeItem("onesmm_saved_accounts");
+                sessionStorage.removeItem("onesmm_current_candidate");
+                updatePanelStats();
+                setPanelStatus("🗑️ حافظه اکانتها ریست شد.");
+            }
+        });
+
+        updatePanelStats();
     }
 
     function updatePanelUI() {
         const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
         const btn = document.getElementById("onesmm-toggle-btn");
         if (btn) {
-            btn.textContent = isLoop ? "⏹️ توقف چرخه" : "▶️ شروع چرخه";
-            btn.style.backgroundColor = isLoop ? "#ef4444" : "#22c55e";
+            btn.textContent = isLoop ? '⏹️ توقف چرخه' : '▶️ شروع چرخه خودکار';
+            btn.style.backgroundColor = isLoop ? '#ef4444' : '#22c55e';
         }
         updatePanelStats();
     }
