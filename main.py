@@ -19,7 +19,6 @@ current_accounts = []
 total_created_count = 0
 last_update_id = 0
 lock = threading.Lock()
-chrome_process = None
 
 
 def send_tg_msg(text):
@@ -27,8 +26,8 @@ def send_tg_msg(text):
         keyboard = {
             "keyboard": [
                 [{"text": "▶️ شروع چرخه"}, {"text": "⏹️ توقف چرخه"}],
-                [{"text": "📊 وضعیت"}, {"text": "💾 دریافت فایل اکانت‌ها"}],
-                [{"text": "🗑️ ریست حافظه"}]
+                [{"text": "📊 وضعیت"}, {"text": "📸 عکس از صفحه"}],
+                [{"text": "💾 دریافت فایل اکانت‌ها"}, {"text": "🗑️ ریست حافظه"}]
             ],
             "resize_keyboard": True
         }
@@ -41,6 +40,16 @@ def send_tg_msg(text):
         }, timeout=10)
     except Exception as e:
         print(f"[!] Telegram send error: {e}")
+
+
+def send_tg_photo(image_bytes, caption):
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+        files = {"photo": ("screenshot.png", image_bytes, "image/png")}
+        data = {"chat_id": TELEGRAM_CHAT_ID, "caption": caption, "parse_mode": "Markdown"}
+        requests.post(url, data=data, files=files, timeout=20)
+    except Exception as e:
+        print(f"[!] Telegram photo error: {e}")
 
 
 def send_tg_file(accounts_list, caption):
@@ -60,7 +69,6 @@ def send_tg_file(accounts_list, caption):
         print(f"[!] Telegram file send error: {e}")
 
 
-# ─── سرور محلی برای دریافت گزارش از افزونه کروم ─────────────────
 class ExtensionWebhookHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
@@ -106,9 +114,8 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
                 total_created_count += 1
                 count = len(current_accounts)
 
-            print(f"[✓] افزونه اکانت جدید ساخت: {username}")
+            print(f"[✓] اکانت جدید: {username}")
 
-            # ارسال پیام آنی به تلگرام
             send_tg_msg(
                 f"👤 *اکانت جدید ساخته شد ({count}/{BATCH_SIZE}):*\n"
                 f"Username: `{username}`\n"
@@ -116,7 +123,6 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
                 f"Password: `{password}`"
             )
 
-            # ارسال فایل ۲۵ تایی در صورت تکمیل پکیج
             if count >= BATCH_SIZE:
                 with lock:
                     batch_to_send = list(current_accounts)
@@ -124,7 +130,7 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
 
                 send_tg_file(
                     batch_to_send,
-                    f"🎁 *پکیج {BATCH_SIZE} تایی تکمیل و ارسال شد!*\n🔄 حافظه ریست شد و چرخه ادامه دارد."
+                    f"🎁 *پکیج {BATCH_SIZE} تایی تکمیل و ارسال شد!*\n🔄 حافظه ریست شد."
                 )
 
             self.send_response(200)
@@ -136,23 +142,19 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_response(500)
             self.end_headers()
-            print(f"[!] Error processing webhook: {e}")
 
     def log_message(self, format, *args):
-        return  # خاموش کردن لاگ‌های پر سر و صدای HTTP
+        return
 
 
 def run_local_api_server():
     server = HTTPServer(('0.0.0.0', LOCAL_SERVER_PORT), ExtensionWebhookHandler)
-    print(f"📡 وب‌هوک محلی پایتون روی پورت {LOCAL_SERVER_PORT} فعال شد.")
     server.serve_forever()
 
 
-# ─── شنود دستورات تلگرام ─────────────────────────────────────────
 def telegram_listener():
     global is_running, last_update_id, current_accounts
-    print("🤖 ربات تلگرام آماده دریافت دستورات است...")
-    send_tg_msg("🚀 *مدیریت پایتونی ربات در Railway فعال شد!*\nمرورگر کروم همراه با افزونه در حال اجرا است.")
+    send_tg_msg("🚀 *ربات تلگرام در Railway فعال شد!*")
 
     while True:
         try:
@@ -177,13 +179,23 @@ def telegram_listener():
                     elif text in ["/stop", "⏹️ توقف چرخه"]:
                         with lock:
                             is_running = False
-                        send_tg_msg(f"⏹️ *چرخه ساخت اکانت متوقف شد.*\nپیشرفت فعلی: *{len(current_accounts)} / {BATCH_SIZE}*")
+                        send_tg_msg(f"⏹️ *چرخه ساخت اکانت متوقف شد.*")
+
+                    elif text in ["/screenshot", "📸 عکس از صفحه"]:
+                        os.system("DISPLAY=:99 scrot -o /tmp/screen.png")
+                        if os.path.exists("/tmp/screen.png"):
+                            try:
+                                with open("/tmp/screen.png", "rb") as f:
+                                    send_tg_photo(f.read(), "📸 *تصویر زنده از صفحه نمایش کروم در Railway*")
+                            except Exception:
+                                send_tg_msg("⚠️ خطای خواندن تصویر اسکرین‌شات.")
+                        else:
+                            send_tg_msg("⚠️ تصویری یافت نشد.")
 
                     elif text in ["/status", "📊 وضعیت"]:
                         status_str = "🟢 در حال ساخت" if is_running else "🔴 متوقف"
                         send_tg_msg(
                             f"📊 *وضعیت زنده ربات در Railway:*\n"
-                            f"• موتور ثبت‌نام: افزونه اختصاصی داخل Chrome واقعی\n"
                             f"• وضعیت چرخه: {status_str}\n"
                             f"• پیشرفت پکیج جاری: *{len(current_accounts)} از {BATCH_SIZE} عدد*\n"
                             f"• مجموع کل اکانت‌های ساخته‌شده: *{total_created_count} عدد*"
@@ -210,9 +222,7 @@ def telegram_listener():
         time.sleep(1)
 
 
-# ─── راه‌اندازی و مدیریت پروسه گوگل کروم ────────────────────────
 def start_chrome_supervisor():
-    print("🖥️ راه‌اندازی نمایشگر مجازی Xvfb...")
     os.system("Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &")
     os.environ["DISPLAY"] = ":99"
     time.sleep(2)
@@ -239,24 +249,15 @@ def start_chrome_supervisor():
     ]
 
     while True:
-        print("🌐 اجرای پروسه Google Chrome همراه با افزونه اختصاصی...")
         try:
             proc = subprocess.Popen(chrome_cmd)
             proc.wait()
-            print("⚠️ پروسه کروم بسته شد. راه‌اندازی مجدد در ۳ ثانیه...")
         except Exception as e:
-            print(f"[!] خطا در اجرای کروم: {e}")
+            pass
         time.sleep(3)
 
 
 if __name__ == "__main__":
-    # ۱. اجرای سرور وب‌هوک در بک‌گراند
-    api_thread = threading.Thread(target=run_local_api_server, daemon=True)
-    api_thread.start()
-
-    # ۲. اجرای شنود تلگرام در بک‌گراند
-    tg_thread = threading.Thread(target=telegram_listener, daemon=True)
-    tg_thread.start()
-
-    # ۳. اجرای ناظر مرورگر کروم
+    threading.Thread(target=run_local_api_server, daemon=True).start()
+    threading.Thread(target=telegram_listener, daemon=True).start()
     start_chrome_supervisor()

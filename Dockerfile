@@ -1,11 +1,12 @@
 FROM python:3.11-slim
 
-# نصب ابزارهای موردنیاز، مرورگر رسمی Google Chrome و نمایشگر مجازی Xvfb
+# نصب ابزارهای موردنیاز، مرورگر رسمی Google Chrome، نمایشگر مجازی Xvfb و ابزار اسکرین‌شات scrot
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     xvfb \
+    scrot \
     fonts-liberation \
     libnss3 \
     libxss1 \
@@ -25,5 +26,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# پایتون به عنوان ناظر پروسه کروم و ربات تلگرام اجرا می‌شود
 CMD ["python", "main.py"]
