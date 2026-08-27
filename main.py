@@ -3,17 +3,15 @@ import sys
 import time
 import json
 import threading
-import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
-import websocket
+from playwright.sync_api import sync_playwright
 
 # ─── تنظیمات تلگرام و پکیج ──────────────────────────────────────
 TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs"
 TELEGRAM_CHAT_ID   = "8496696077"
 BATCH_SIZE         = 25
 LOCAL_SERVER_PORT  = 5000
-CDP_PORT           = 9222
 # ───────────────────────────────────────────────────────────────
 
 is_running = True
@@ -69,49 +67,6 @@ def send_tg_file(accounts_list, caption):
         requests.post(url, data=data, files=files, timeout=25)
     except Exception as e:
         print(f"[!] Telegram file send error: {e}")
-
-
-# ─── تزریق مستقیم اسکریپت به موتور کروم (CDP Direct Injection) ──
-def inject_userscript_via_cdp():
-    print("⏳ در حال تلاش برای تزریق مستقیم اسکریپت به کروم...")
-    for attempt in range(15):
-        time.sleep(2)
-        try:
-            res = requests.get(f"http://127.0.0.1:{CDP_PORT}/json", timeout=3).json()
-            for tab in res:
-                if tab.get("type") == "page":
-                    ws_url = tab.get("webSocketDebuggerUrl")
-                    if ws_url:
-                        # خواندن کد تمپرمانکی
-                        script_path = "/app/extension/content.js" if os.path.exists("/app/extension/content.js") else "extension/content.js"
-                        with open(script_path, "r", encoding="utf-8") as f:
-                            script_code = f.read()
-
-                        ws = websocket.create_connection(ws_url, timeout=5)
-                        
-                        # ۱. فعال‌سازی دامنه Page
-                        ws.send(json.dumps({"id": 1, "method": "Page.enable"}))
-                        
-                        # ۲. تزریق دائمی برای تمام صفحات و فریم‌ها (دقیقاً مثل Tampermonkey)
-                        ws.send(json.dumps({
-                            "id": 2,
-                            "method": "Page.addScriptToEvaluateOnNewDocument",
-                            "params": {"source": script_code}
-                        }))
-                        
-                        # ۳. اجرای فوری روی صفحه فعلی باز شده
-                        ws.send(json.dumps({
-                            "id": 3,
-                            "method": "Runtime.evaluate",
-                            "params": {"expression": script_code}
-                        }))
-                        
-                        ws.close()
-                        print("🎯 [موفقیت] اسکریپت تمپرمانکی با موفقیت مستقیماً به هسته کروم تزریق شد!")
-                        return True
-        except Exception as e:
-            pass
-    return False
 
 
 class ExtensionWebhookHandler(BaseHTTPRequestHandler):
@@ -267,38 +222,53 @@ def telegram_listener():
         time.sleep(1)
 
 
-def start_chrome_supervisor():
+# راه‌اندازی مرورگر گرافیکی واقعی (با تضمین اجرای اسکریپت تمپرمانکی)
+def run_browser_with_injected_userscript():
     os.system("Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &")
     os.environ["DISPLAY"] = ":99"
     time.sleep(2)
 
-    chrome_cmd = [
-        "google-chrome-stable",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-software-rasterizer",
-        f"--remote-debugging-port={CDP_PORT}",
-        "--user-data-dir=/app/chrome_profile",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--window-size=1920,1080",
-        "--start-maximized",
-        "https://onesmm.com/signup"
-    ]
+    script_path = "/app/extension/content.js" if os.path.exists("/app/extension/content.js") else "extension/content.js"
+    with open(script_path, "r", encoding="utf-8") as f:
+        tampermonkey_code = f.read()
 
-    while True:
-        try:
-            proc = subprocess.Popen(chrome_cmd)
-            # تزریق مستقیم اسکریپت تمپرمانکی به هسته کروم به محض بالا آمدن
-            threading.Thread(target=inject_userscript_via_cdp, daemon=True).start()
-            proc.wait()
-        except Exception as e:
-            pass
-        time.sleep(3)
+    with sync_playwright() as p:
+        while True:
+            try:
+                print("🌐 راه‌اندازی مرورگر گرافیکی کامل با اسکریپت تمپرمانکی...")
+                context = p.chromium.launch_persistent_context(
+                    user_data_dir="/app/chrome_profile",
+                    headless=False,  # مرورگر گرافیکی واقعی در نمایشگر مجازی
+                    args=[
+                        "--no-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-blink-features=AutomationControlled",
+                        "--window-size=1920,1080",
+                        "--start-maximized"
+                    ]
+                )
+
+                # تزریق تضمینی ۱۰۰٪ اسکریپت تمپرمانکی به تمام صفحات و فریم‌ها
+                context.add_init_script(tampermonkey_code)
+
+                page = context.new_page()
+                page.set_viewport_size({"width": 1920, "height": 1080})
+                page.goto("https://onesmm.com/signup")
+
+                print("[✓] صفحه باز شد و اسکریپت تمپرمانکی فعال است.")
+
+                # حلقه زنده نگه داشتن مرورگر
+                while True:
+                    time.sleep(10)
+                    if page.is_closed():
+                        break
+
+            except Exception as e:
+                print(f"[!] خطای مرورگر: {e}")
+                time.sleep(3)
 
 
 if __name__ == "__main__":
     threading.Thread(target=run_local_api_server, daemon=True).start()
     threading.Thread(target=telegram_listener, daemon=True).start()
-    start_chrome_supervisor()
+    run_browser_with_injected_userscript()
