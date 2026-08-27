@@ -14,11 +14,25 @@ BATCH_SIZE         = 25
 LOCAL_SERVER_PORT  = 5000
 # ───────────────────────────────────────────────────────────────
 
+PROXIES = [
+    {"server": "http://31.59.20.176:6754",   "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "UK 🇬🇧"},
+    {"server": "http://45.38.107.97:6014",   "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "UK 🇬🇧"},
+    {"server": "http://198.105.121.200:6462", "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "UK 🇬🇧"},
+    {"server": "http://64.137.96.74:6641",   "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "Spain 🇪🇸"},
+    {"server": "http://198.23.243.226:6361", "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "US 🇺🇸"},
+    {"server": "http://38.154.185.97:6370",  "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "US 🇺🇸"},
+    {"server": "http://84.247.60.125:6095",  "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "Poland 🇵🇱"},
+    {"server": "http://142.111.67.146:5611", "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "Japan 🇯🇵"},
+    {"server": "http://191.96.254.138:6185", "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "US 🇺🇸"},
+    {"server": "http://31.58.9.4:6077",      "username": "dprcdrqc", "password": "tbzxenvozzvm", "country": "Germany 🇩🇪"},
+]
+
 is_running = True
 current_accounts = []
 total_created_count = 0
 last_update_id = 0
 lock = threading.Lock()
+current_proxy_idx = 0
 
 
 def send_tg_msg(text):
@@ -93,7 +107,7 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode('utf-8'))
 
     def do_POST(self):
-        global current_accounts, total_created_count
+        global current_accounts, total_created_count, current_proxy_idx
 
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
@@ -114,7 +128,7 @@ class ExtensionWebhookHandler(BaseHTTPRequestHandler):
                 total_created_count += 1
                 count = len(current_accounts)
 
-            print(f"[✓] اکانت جدید: {username}")
+            print(f"[✓] اکانت ساخته شد: {username}")
 
             send_tg_msg(
                 f"👤 *اکانت جدید ساخته شد ({count}/{BATCH_SIZE}):*\n"
@@ -153,7 +167,7 @@ def run_local_api_server():
 
 
 def telegram_listener():
-    global is_running, last_update_id, current_accounts
+    global is_running, last_update_id, current_accounts, current_proxy_idx
     send_tg_msg("🚀 *ربات تلگرام در Railway فعال شد!*")
 
     while True:
@@ -194,9 +208,11 @@ def telegram_listener():
 
                     elif text in ["/status", "📊 وضعیت"]:
                         status_str = "🟢 در حال ساخت" if is_running else "🔴 متوقف"
+                        proxy_info = PROXIES[current_proxy_idx % len(PROXIES)]["country"]
                         send_tg_msg(
                             f"📊 *وضعیت زنده ربات در Railway:*\n"
                             f"• وضعیت چرخه: {status_str}\n"
+                            f"• پروکسی جاری: {proxy_info}\n"
                             f"• پیشرفت پکیج جاری: *{len(current_accounts)} از {BATCH_SIZE} عدد*\n"
                             f"• مجموع کل اکانت‌های ساخته‌شده: *{total_created_count} عدد*"
                         )
@@ -222,8 +238,9 @@ def telegram_listener():
         time.sleep(1)
 
 
-# راه‌اندازی مرورگر گرافیکی واقعی (با تضمین اجرای اسکریپت تمپرمانکی)
+# اجرای مرورگر کاملاً طبیعی، بدون فلگ اتومیشن، همراه با پروکسی چرخشی
 def run_browser_with_injected_userscript():
+    global current_proxy_idx
     os.system("Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &")
     os.environ["DISPLAY"] = ":99"
     time.sleep(2)
@@ -234,38 +251,69 @@ def run_browser_with_injected_userscript():
 
     with sync_playwright() as p:
         while True:
+            proxy = PROXIES[current_proxy_idx % len(PROXIES)]
+            print(f"\n[+] باز کردن مرورگر طبیعی با پروکسی: {proxy['country']} ({proxy['server']})")
+
+            browser = None
+            context = None
             try:
-                print("🌐 راه‌اندازی مرورگر گرافیکی کامل با اسکریپت تمپرمانکی...")
+                # حذف کامل بنر و فلگ‌های اتومیشن Chrome is being controlled...
                 context = p.chromium.launch_persistent_context(
-                    user_data_dir="/app/chrome_profile",
-                    headless=False,  # مرورگر گرافیکی واقعی در نمایشگر مجازی
+                    user_data_dir=f"/app/chrome_profile_{current_proxy_idx % 5}",
+                    headless=False,
+                    ignore_default_args=["--enable-automation"],
+                    proxy={
+                        "server": proxy["server"],
+                        "username": proxy["username"],
+                        "password": proxy["password"]
+                    },
                     args=[
                         "--no-sandbox",
                         "--disable-dev-shm-usage",
                         "--disable-blink-features=AutomationControlled",
+                        "--disable-infobars",
                         "--window-size=1920,1080",
                         "--start-maximized"
                     ]
                 )
 
-                # تزریق تضمینی ۱۰۰٪ اسکریپت تمپرمانکی به تمام صفحات و فریم‌ها
+                # تزریق اسکریپت ضدتشخیص + کدهای تمپرمانکی
+                context.add_init_script("""
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+                """)
                 context.add_init_script(tampermonkey_code)
 
                 page = context.new_page()
                 page.set_viewport_size({"width": 1920, "height": 1080})
-                page.goto("https://onesmm.com/signup")
+                page.goto("https://onesmm.com/signup", wait_until="domcontentloaded", timeout=30000)
 
-                print("[✓] صفحه باز شد و اسکریپت تمپرمانکی فعال است.")
+                print(f"[✓] صفحه باز شد روی پروکسی {proxy['country']}.")
 
-                # حلقه زنده نگه داشتن مرورگر
+                # چرخه بررسی صفحه (اگر بیش از ۱ دقیقه روی یک صفحه گیر کرد، سوئیچ پروکسی)
+                stuck_timer = 0
                 while True:
-                    time.sleep(10)
+                    time.sleep(5)
+                    stuck_timer += 5
                     if page.is_closed():
+                        break
+                    # اگر بعد از ۷۰ ثانیه هیچ اکانتی نساخت (مثلا به خاطر عکس کپچا)، برو پروکسی بعدی
+                    if stuck_timer > 70:
+                        print("⏳ زمان انتظار به پایان رسید، سوئیچ به پروکسی بعدی...")
+                        current_proxy_idx += 1
                         break
 
             except Exception as e:
                 print(f"[!] خطای مرورگر: {e}")
+                current_proxy_idx += 1
                 time.sleep(3)
+
+            finally:
+                if context:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
 
 
 if __name__ == "__main__":
