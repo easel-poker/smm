@@ -6,12 +6,14 @@ import threading
 import subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import requests
+import websocket
 
 # ─── تنظیمات تلگرام و پکیج ──────────────────────────────────────
 TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs"
 TELEGRAM_CHAT_ID   = "8496696077"
 BATCH_SIZE         = 25
 LOCAL_SERVER_PORT  = 5000
+CDP_PORT           = 9222
 # ───────────────────────────────────────────────────────────────
 
 is_running = True
@@ -67,6 +69,49 @@ def send_tg_file(accounts_list, caption):
         requests.post(url, data=data, files=files, timeout=25)
     except Exception as e:
         print(f"[!] Telegram file send error: {e}")
+
+
+# ─── تزریق مستقیم اسکریپت به موتور کروم (CDP Direct Injection) ──
+def inject_userscript_via_cdp():
+    print("⏳ در حال تلاش برای تزریق مستقیم اسکریپت به کروم...")
+    for attempt in range(15):
+        time.sleep(2)
+        try:
+            res = requests.get(f"http://127.0.0.1:{CDP_PORT}/json", timeout=3).json()
+            for tab in res:
+                if tab.get("type") == "page":
+                    ws_url = tab.get("webSocketDebuggerUrl")
+                    if ws_url:
+                        # خواندن کد تمپرمانکی
+                        script_path = "/app/extension/content.js" if os.path.exists("/app/extension/content.js") else "extension/content.js"
+                        with open(script_path, "r", encoding="utf-8") as f:
+                            script_code = f.read()
+
+                        ws = websocket.create_connection(ws_url, timeout=5)
+                        
+                        # ۱. فعال‌سازی دامنه Page
+                        ws.send(json.dumps({"id": 1, "method": "Page.enable"}))
+                        
+                        # ۲. تزریق دائمی برای تمام صفحات و فریم‌ها (دقیقاً مثل Tampermonkey)
+                        ws.send(json.dumps({
+                            "id": 2,
+                            "method": "Page.addScriptToEvaluateOnNewDocument",
+                            "params": {"source": script_code}
+                        }))
+                        
+                        # ۳. اجرای فوری روی صفحه فعلی باز شده
+                        ws.send(json.dumps({
+                            "id": 3,
+                            "method": "Runtime.evaluate",
+                            "params": {"expression": script_code}
+                        }))
+                        
+                        ws.close()
+                        print("🎯 [موفقیت] اسکریپت تمپرمانکی با موفقیت مستقیماً به هسته کروم تزریق شد!")
+                        return True
+        except Exception as e:
+            pass
+    return False
 
 
 class ExtensionWebhookHandler(BaseHTTPRequestHandler):
@@ -233,8 +278,7 @@ def start_chrome_supervisor():
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--disable-software-rasterizer",
-        "--disable-extensions-except=/app/extension",
-        "--load-extension=/app/extension",
+        f"--remote-debugging-port={CDP_PORT}",
         "--user-data-dir=/app/chrome_profile",
         "--no-first-run",
         "--no-default-browser-check",
@@ -246,6 +290,8 @@ def start_chrome_supervisor():
     while True:
         try:
             proc = subprocess.Popen(chrome_cmd)
+            # تزریق مستقیم اسکریپت تمپرمانکی به هسته کروم به محض بالا آمدن
+            threading.Thread(target=inject_userscript_via_cdp, daemon=True).start()
             proc.wait()
         except Exception as e:
             pass
