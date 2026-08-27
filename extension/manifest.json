@@ -1,15 +1,18 @@
 {
   "manifest_version": 3,
   "name": "OneSMM Auto Register Loop",
-  "version": "1.0",
-  "description": "Exact Tampermonkey Logic as a Native Chrome Extension for Railway",
+  "version": "2.0",
+  "description": "Native Extension for OneSMM Registration and Python Supervisor Bridge",
   "permissions": [
     "storage"
   ],
   "host_permissions": [
+    "http://127.0.0.1:5000/*",
+    "http://localhost:5000/*",
     "https://api.telegram.org/*",
     "https://onesmm.com/*",
-    "https://*.hcaptcha.com/*"
+    "https://*.hcaptcha.com/*",
+    "https://newassets.hcaptcha.com/*"
   ],
   "content_scripts": [
     {
@@ -20,7 +23,7 @@
       ],
       "js": ["content.js"],
       "all_frames": true,
-      "run_at": "document_end"
+      "run_at": "document_start"
     }
   ]
 }

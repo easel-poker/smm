@@ -1,14 +1,10 @@
-// ─── تنظیمات اختصاصی تلگرام شما ───────────────────────────
-const TELEGRAM_BOT_TOKEN = "8889364969:AAGqjYvQgSxvTivPQaa4vJSELgRpDYDajzs";
-const TELEGRAM_CHAT_ID   = "8496696077";
-const BATCH_SIZE         = 25; // ارسال فایل و ریست هر ۲۵ اکانت
-const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود کامل اکانت
+// ─── تنظیمات افزونه OneSMM ─────────────────────────────────
+const LOGOUT_WAIT_SEC = 3;  // ۳ ثانیه انتظار پس از لود کامل اکانت
+const PYTHON_API_URL  = "http://127.0.0.1:5000";
 // ──────────────────────────────────────────────────────────
 
 (function() {
     'use strict';
-
-    let lastUpdateId = parseInt(localStorage.getItem("tg_last_update_id") || "0");
 
     // 🔥 جعل دائمی فوکوس و فعال بودن تب در پس‌زمینه
     bypassBackgroundThrottling();
@@ -50,9 +46,8 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
         return;
     }
 
-    // ۲. چرخه ثبت‌نام و مدیریت هوشمند تلگرام در OneSMM
+    // ۲. چرخه ثبت‌نام OneSMM
     if (window.location.hostname.includes("onesmm.com")) {
-        // اجرای مطمئن
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initExtensionBot);
         } else {
@@ -65,35 +60,35 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
                 createControlPanel();
             }
 
-            if (localStorage.getItem("onesmm_loop_active") === "true" && isUserActuallyLoggedIn() && !window.onesmm_is_logging_out) {
+            if (localStorage.getItem("onesmm_loop_active") !== "false" && isUserActuallyLoggedIn() && !window.onesmm_is_logging_out) {
                 window.onesmm_is_logging_out = true;
                 handleLoggedInAccount();
             }
         }, 800);
     }
 
-    function initExtensionBot() {
+    async function initExtensionBot() {
         createControlPanel();
 
-        // پیام روشن شدن اولیه سرور
-        if (!sessionStorage.getItem("railway_startup_notified")) {
-            sessionStorage.setItem("railway_startup_notified", "true");
-            sendTelegramMessage("🚀 *ربات OneSMM (نسخه مرورگر واقعی Chrome + اکستنشن) در Railway روشن شد!*\nچرخه خودکار آماده است.");
-        }
-
-        // شنود دستورات تلگرام هر ۲ ثانیه
-        setInterval(pollTelegramCommands, 2000);
+        // همگام‌سازی وضعیت شروع با سرور ناظر پایتون
+        try {
+            const res = await fetch(PYTHON_API_URL, { timeout: 2000 });
+            const data = await res.json();
+            if (data && data.is_running !== undefined) {
+                localStorage.setItem("onesmm_loop_active", data.is_running ? "true" : "false");
+            }
+        } catch (e) {}
 
         setTimeout(processFlow, 600);
     }
 
     function processFlow() {
-        const isLoopActive = localStorage.getItem("onesmm_loop_active") === "true";
+        const isLoopActive = localStorage.getItem("onesmm_loop_active") !== "false";
         if (!isLoopActive) return;
 
         const path = window.location.pathname.toLowerCase();
 
-        // الف) اگر کاربر وارد اکانت شده -> صبر ۳ ثانیه‌ای و خروج
+        // الف) اگر کاربر داخل اکانت است -> صبر ۳ ثانیه‌ای و خروج
         if (isUserActuallyLoggedIn()) {
             if (!window.onesmm_is_logging_out) {
                 window.onesmm_is_logging_out = true;
@@ -120,109 +115,6 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
 
     function isUserActuallyLoggedIn() {
         return document.querySelector("a[href*='/logout'], a[href*='logout'], a[href*='signout'], .user-avatar, .account-balance, a[href*='/orders'], a[href*='/dashboard']") !== null;
-    }
-
-    // دریافت و پردازش دستورات بات تلگرام
-    async function pollTelegramCommands() {
-        try {
-            const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=1`);
-            const data = await res.json();
-            if (!data || !data.ok || !data.result) return;
-
-            for (const update of data.result) {
-                lastUpdateId = update.update_id;
-                localStorage.setItem("tg_last_update_id", lastUpdateId.toString());
-
-                const msg = update.message || update.callback_query?.message;
-                const text = update.message?.text || update.callback_query?.data || "";
-                const senderId = (msg?.chat?.id || "").toString();
-
-                if (senderId !== TELEGRAM_CHAT_ID.toString()) continue;
-
-                handleTelegramCommand(text.trim());
-            }
-        } catch (e) {}
-    }
-
-    function handleTelegramCommand(cmd) {
-        const accounts = JSON.parse(localStorage.getItem("onesmm_saved_accounts") || "[]");
-
-        if (cmd === "/start" || cmd === "▶️ شروع چرخه") {
-            localStorage.setItem("onesmm_loop_active", "true");
-            sendTelegramMessage(`🚀 *چرخه خودکار در سرور Railway فعال شد!*\nبه ازای هر ${BATCH_SIZE} اکانت، یک فایل متنی دریافت خواهید کرد.`);
-            updatePanelUI();
-            if (!window.location.pathname.includes("/signup")) {
-                window.location.href = "https://onesmm.com/signup";
-            } else {
-                runRegistrationFlow();
-            }
-        }
-        else if (cmd === "/stop" || cmd === "⏹️ توقف چرخه") {
-            localStorage.setItem("onesmm_loop_active", "false");
-            sendTelegramMessage(`⏹️ *چرخه خودکار متوقف شد.*\nپیشرفت فعلی: *${accounts.length} / ${BATCH_SIZE}*`);
-            updatePanelUI();
-        }
-        else if (cmd === "/status" || cmd === "📊 وضعیت") {
-            const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
-            sendTelegramMessage(
-                `📊 *وضعیت زنده ربات در Railway:*\n` +
-                `• موتور اجرا: مرورگر واقعی Chrome + اکستنشن\n` +
-                `• وضعیت چرخه: ${isLoop ? "🟢 در حال ساخت" : "🔴 متوقف"}\n` +
-                `• پیشرفت پکیج جاری: *${accounts.length} از ${BATCH_SIZE} عدد*`
-            );
-        }
-        else if (cmd === "/export" || cmd === "💾 دریافت فایل اکانت‌ها") {
-            if (accounts.length === 0) {
-                sendTelegramMessage("⚠️ در پکیج فعلی هنوز اکانتی ساخته نشده است!");
-                return;
-            }
-            sendBatchFile(accounts, `onesmm_railway_${accounts.length}.txt`, `💾 خروجی دستی (${accounts.length} اکانت)`);
-        }
-        else if (cmd === "/reset" || cmd === "🗑️ ریست حافظه") {
-            localStorage.setItem("onesmm_saved_accounts", "[]");
-            updatePanelStats();
-            sendTelegramMessage("🗑️ *حافظه پکیج جاری در Railway صفر شد.*");
-        }
-    }
-
-    function sendTelegramMessage(text) {
-        const keyboard = {
-            keyboard: [
-                [{ text: "▶️ شروع چرخه" }, { text: "⏹️ توقف چرخه" }],
-                [{ text: "📊 وضعیت" }, { text: "💾 دریافت فایل اکانت‌ها" }],
-                [{ text: "🗑️ ریست حافظه" }]
-            ],
-            resize_keyboard: true
-        };
-
-        fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                chat_id: TELEGRAM_CHAT_ID,
-                text: text,
-                parse_mode: "Markdown",
-                reply_markup: keyboard
-            })
-        }).catch(() => {});
-    }
-
-    function sendBatchFile(accounts, filename, caption) {
-        let content = `=== لیست ${accounts.length} اکانت ثبت‌شده OneSMM در Railway ===\n\n`;
-        accounts.forEach((acc, i) => {
-            content += `[${i+1}] ${acc.time}\nUsername: ${acc.username}\nEmail: ${acc.email}\nPassword: ${acc.password}\n-----------------------------------\n`;
-        });
-
-        const formData = new FormData();
-        formData.append("chat_id", TELEGRAM_CHAT_ID);
-        formData.append("caption", caption || `🎁 *پکیج ${accounts.length} تایی اکانت‌های جدید OneSMM*`);
-        formData.append("parse_mode", "Markdown");
-        formData.append("document", new Blob([content], { type: "text/plain" }), filename);
-
-        fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument`, {
-            method: "POST",
-            body: formData
-        }).catch(() => {});
     }
 
     function handleLoggedInAccount() {
@@ -306,7 +198,7 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
                     password: password
                 }));
 
-                // ۱. کلیک روی Sign up تا کادر کپچا ظاهر شود
+                // ۱. کلیک اول روی Sign up تا کادر کپچا ظاهر شود
                 setPanelStatus("🚀 ۱. کلیک Sign up برای احضار کپچا...");
                 setTimeout(() => {
                     clickSignupButton();
@@ -376,20 +268,12 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
                 localStorage.setItem("onesmm_saved_accounts", JSON.stringify(accounts));
                 updatePanelStats();
 
-                // ارسال اعلان لحظه‌ای ساخت اکانت به تلگرام
-                sendTelegramMessage(
-                    `👤 *اکانت جدید ساخته شد (${accounts.length}/${BATCH_SIZE}):*\n` +
-                    `Username: \`${acc.username}\`\n` +
-                    `Email: \`${acc.email}\`\n` +
-                    `Password: \`${acc.password}\``
-                );
-
-                // ارسال پکیج ۲۵ تایی در صورت تکمیل
-                if (accounts.length >= BATCH_SIZE) {
-                    sendBatchFile(accounts, `onesmm_batch_${BATCH_SIZE}_${Date.now()}.txt`, `🎁 *پکیج ${BATCH_SIZE} تایی تکمیل و ارسال شد!*\nحافظه برای پکیج بعدی ریست شد.`);
-                    localStorage.setItem("onesmm_saved_accounts", "[]");
-                    updatePanelStats();
-                }
+                // گزارش فوری به ناظر پایتون جهت ارسال به تلگرام
+                fetch(PYTHON_API_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(acc)
+                }).catch(() => {});
             }
             sessionStorage.removeItem("onesmm_current_candidate");
         }
@@ -414,7 +298,7 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
         panel.style.boxShadow = "0 10px 30px rgba(0,0,0,0.6)";
         panel.style.minWidth = "260px";
 
-        const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
+        const isLoop = localStorage.getItem("onesmm_loop_active") !== "false";
 
         panel.innerHTML = `
             <div style="font-weight: bold; color: #38bdf8; margin-bottom: 6px; font-size: 14px; text-align: center;">🤖 چرخه خودکار OneSMM</div>
@@ -442,7 +326,7 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
         document.body.appendChild(panel);
 
         document.getElementById("onesmm-toggle-btn").addEventListener("click", function() {
-            const current = localStorage.getItem("onesmm_loop_active") === "true";
+            const current = localStorage.getItem("onesmm_loop_active") !== "false";
             if (current) {
                 localStorage.setItem("onesmm_loop_active", "false");
                 this.textContent = "▶️ شروع چرخه خودکار";
@@ -470,7 +354,16 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
                 alert("هنوز اکانتی در لیست ذخیره نشده است!");
                 return;
             }
-            sendBatchFile(accounts, `onesmm_manual_${accounts.length}.txt`, `💾 دانلود دستی لیست اکانت‌ها`);
+            let content = "=== لیست کامل اکانتهای ثبتشده OneSMM ===\n\n";
+            accounts.forEach((acc, i) => {
+                content += `[${i+1}] ${acc.time}\nUsername: ${acc.username}\nEmail: ${acc.email}\nPassword: ${acc.password}\n-----------------------------------\n`;
+            });
+
+            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `onesmm_accounts_${accounts.length}.txt`;
+            link.click();
         });
 
         document.getElementById("onesmm-reset-btn").addEventListener("click", function() {
@@ -487,16 +380,6 @@ const LOGOUT_WAIT_SEC    = 3;  // ۳ ثانیه انتظار پس از لود ک
             }
         });
 
-        updatePanelStats();
-    }
-
-    function updatePanelUI() {
-        const isLoop = localStorage.getItem("onesmm_loop_active") === "true";
-        const btn = document.getElementById("onesmm-toggle-btn");
-        if (btn) {
-            btn.textContent = isLoop ? '⏹️ توقف چرخه' : '▶️ شروع چرخه خودکار';
-            btn.style.backgroundColor = isLoop ? '#ef4444' : '#22c55e';
-        }
         updatePanelStats();
     }
 

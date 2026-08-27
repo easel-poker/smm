@@ -1,6 +1,6 @@
-FROM debian:bullseye-slim
+FROM python:3.11-slim
 
-# نصب وابستگی‌های لازم، مرورگر رسمی Google Chrome و نمایشگر مجازی Xvfb
+# نصب ابزارهای موردنیاز، مرورگر رسمی Google Chrome و نمایشگر مجازی Xvfb
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -20,9 +20,10 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY . .
 
-RUN chmod +x start.sh
-
-# اجرای کروم واقعی ۲۴ ساعته همراه با اکستنشن اختصاصی
-CMD ["bash", "start.sh"]
+# پایتون به عنوان ناظر پروسه کروم و ربات تلگرام اجرا می‌شود
+CMD ["python", "main.py"]
