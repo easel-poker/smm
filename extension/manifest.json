@@ -3,6 +3,14 @@
   "name": "OneSMM Auto Register Loop",
   "version": "1.0",
   "description": "Exact Tampermonkey Logic as a Native Chrome Extension for Railway",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.telegram.org/*",
+    "https://onesmm.com/*",
+    "https://*.hcaptcha.com/*"
+  ],
   "content_scripts": [
     {
       "matches": [

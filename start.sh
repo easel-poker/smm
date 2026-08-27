@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# غیرفعال‌سازی هشدارهای D-Bus در داکر لینوکس
+# سایلنت کردن کامل خطاهای سیستمی داکر
 export NO_AT_BRIDGE=1
 export DBUS_SESSION_BUS_ADDRESS=/dev/null
 
@@ -9,9 +9,8 @@ Xvfb :99 -screen 0 1920x1080x24 -ac +extension GLX +render -noreset &
 export DISPLAY=:99
 sleep 2
 
-echo "🌐 Google Chrome is starting on Railway..."
+echo "🌐 Google Chrome is running 24/7 on Railway..."
 
-# اجرای پایدار کروم در کانتینر
 while true; do
   google-chrome-stable \
     --no-sandbox \
@@ -21,6 +20,9 @@ while true; do
     --disable-background-networking \
     --disable-default-apps \
     --disable-sync \
+    --disable-gcm \
+    --disable-component-update \
+    --disable-domain-reliability \
     --load-extension=/app/extension \
     --disable-extensions-except=/app/extension \
     --user-data-dir=/app/chrome_profile \
